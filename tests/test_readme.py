@@ -14,6 +14,8 @@ def test_readme_includes_codex_plus_icon_and_toc():
 
     assert '<img src="docs/images/codex-plus-plus.png"' in text
     assert 'width="256"' in text
+    assert "![Codex++ 后端状态指示灯](docs/images/backend-status-indicator.png)" in text
+    assert Path("docs/images/backend-status-indicator.png").exists()
     assert "## 目录" in text
     assert "- [Windows 使用](#windows-使用)" in text
     assert "- [常见问题](#常见问题)" in text

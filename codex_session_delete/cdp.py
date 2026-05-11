@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import threading
+import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -11,6 +13,13 @@ import websocket
 
 BridgeHandler = Callable[[str, dict[str, object]], dict[str, object]]
 BRIDGE_BINDING_NAME = "codexSessionDeleteV2"
+
+
+@dataclass(frozen=True)
+class InjectionResult:
+    websocket_url: str
+    bridge_socket: websocket.WebSocket | None
+    result: dict[str, object] | None
 
 
 def list_targets(port: int) -> list[dict[str, object]]:
@@ -52,6 +61,21 @@ def evaluate_script(websocket_url: str, script: str) -> dict[str, object]:
         ws.close()
 
 
+def evaluate_user_scripts(websocket_url: str, script: str) -> dict[str, object] | None:
+    if not script.strip():
+        return None
+    return evaluate_script(websocket_url, script)
+
+
+def open_devtools(port: int) -> dict[str, object]:
+    target = pick_page_target(list_targets(port))
+    target_id = str(target.get("id", ""))
+    if not target_id:
+        return {"status": "failed", "message": "No DevTools target id"}
+    webbrowser.open(f"http://127.0.0.1:{port}/devtools/inspector.html?ws=127.0.0.1:{port}/devtools/page/{target_id}")
+    return {"status": "ok", "target_id": target_id}
+
+
 def build_bridge_script(binding_name: str) -> str:
     return f"""
 (() => {{
@@ -78,16 +102,18 @@ def build_bridge_script(binding_name: str) -> str:
 """
 def install_bridge(websocket_url: str, binding_name: str, handler: BridgeHandler) -> websocket.WebSocket:
     ws = websocket.create_connection(websocket_url, timeout=5)
-    ws.send(json.dumps({"id": 1, "method": "Runtime.addBinding", "params": {"name": binding_name}}))
+    ws.send(json.dumps({"id": 1, "method": "Runtime.enable", "params": {}}))
     _wait_for_id(ws, 1)
-    ws.send(json.dumps({"id": 2, "method": "Runtime.evaluate", "params": {"expression": build_bridge_script(binding_name), "awaitPromise": False, "allowUnsafeEvalBlockedByCSP": True}}))
+    ws.send(json.dumps({"id": 2, "method": "Runtime.addBinding", "params": {"name": binding_name}}))
     _wait_for_id(ws, 2)
+    ws.send(json.dumps({"id": 3, "method": "Runtime.evaluate", "params": {"expression": build_bridge_script(binding_name), "awaitPromise": False, "allowUnsafeEvalBlockedByCSP": True}}))
+    _wait_for_id(ws, 3)
     thread = threading.Thread(target=_bridge_loop, args=(ws, handler), daemon=True)
     thread.start()
     return ws
 
 
-def inject_file(port: int, script_path: Path, helper_port: int, handler: BridgeHandler | None = None) -> websocket.WebSocket | dict[str, object]:
+def inject_file(port: int, script_path: Path, helper_port: int, handler: BridgeHandler | None = None) -> InjectionResult:
     targets = list_targets(port)
     target = pick_page_target(targets)
     websocket_url = str(target["webSocketDebuggerUrl"])
@@ -95,7 +121,7 @@ def inject_file(port: int, script_path: Path, helper_port: int, handler: BridgeH
     script = script_path.read_text(encoding="utf-8")
     prefix = f"window.__CODEX_SESSION_DELETE_HELPER__ = 'http://127.0.0.1:{helper_port}';\n"
     result = evaluate_script(websocket_url, prefix + script)
-    return bridge_socket or result
+    return InjectionResult(websocket_url=websocket_url, bridge_socket=bridge_socket, result=result)
 
 def _bridge_loop(ws: websocket.WebSocket, handler: BridgeHandler) -> None:
     while True:

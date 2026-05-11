@@ -6,7 +6,7 @@
   const codexPlusMenuId = "codex-plus-menu";
   const codexDeleteVersion = "5";
   const codexArchiveDeleteAllVersion = "2";
-  const codexPlusVersion = "1.0.4";
+  const codexPlusVersion = "1.0.5";;
   const codexPlusSettingsKey = "codexPlusSettings";
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
@@ -171,7 +171,11 @@
         justify-content: space-between;
         padding: 18px 20px 10px;
       }
-      .codex-plus-modal-title { font-size: 18px; font-weight: 650; }
+      .codex-plus-modal-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 650; }
+      .codex-plus-backend-indicator { width: 9px; height: 9px; border-radius: 999px; background: #a1a1aa; display: inline-block; }
+      .codex-plus-backend-indicator[data-status="ok"] { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.75); }
+      .codex-plus-backend-indicator[data-status="failed"] { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.75); }
+      .codex-plus-backend-indicator[data-status="checking"] { background: #fbbf24; }
       .codex-plus-modal-close {
         border: 0;
         background: transparent;
@@ -210,6 +214,26 @@
       .codex-plus-toggle[data-enabled="true"] { background: #10a37f; }
       .codex-plus-toggle[data-enabled="true"] span { transform: translateX(18px); }
       .codex-plus-about { color: #a1a1aa; line-height: 1.5; }
+      .codex-plus-tabs { display: flex; gap: 8px; padding: 0 20px 8px; }
+      .codex-plus-tab-button { border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: transparent; color: #d1d5db; font: 12px system-ui, sans-serif; padding: 5px 10px; }
+      .codex-plus-tab-button[data-active="true"] { background: #10a37f; color: white; border-color: #10a37f; }
+      .codex-plus-panel[hidden] { display: none; }
+      .codex-plus-action-button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
+      .codex-plus-backend-status { display: grid; gap: 4px; min-width: 132px; justify-items: end; }
+      .codex-plus-backend-label { color: #a1a1aa; font-size: 12px; }
+      .codex-plus-backend-label[data-status="ok"] { color: #34d399; }
+      .codex-plus-backend-label[data-status="failed"] { color: #f87171; }
+      .codex-plus-backend-repair { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
+      .codex-plus-backend-repair[hidden] { display: none; }
+      .codex-plus-user-script-warning { margin-top: 4px; color: #fbbf24; font-size: 12px; }
+      .codex-plus-user-script-dirs { margin-top: 6px; color: #a1a1aa; font-size: 11px; line-height: 1.4; word-break: break-all; }
+      .codex-plus-user-script-list { margin-top: 8px; display: grid; gap: 6px; }
+      .codex-plus-user-script-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 6px 8px; }
+      .codex-plus-user-script-name { font-size: 12px; }
+      .codex-plus-user-script-meta { margin-top: 2px; color: #a1a1aa; font-size: 11px; }
+      .codex-plus-user-script-error { margin-top: 2px; color: #f87171; font-size: 11px; word-break: break-all; }
+      .codex-plus-user-script-actions { display: grid; justify-items: end; gap: 8px; min-width: 120px; }
+      .codex-plus-user-script-reload { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
     `;
     document.documentElement.appendChild(style);
   }
@@ -240,6 +264,98 @@
     });
   }
 
+  let codexPlusUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
+  let codexPlusBackendStatus = { status: "checking", message: "正在检查后端…" };
+
+  function renderBackendStatus() {
+    const status = codexPlusBackendStatus.status || "failed";
+    const label = document.querySelector("[data-codex-backend-status]");
+    if (label) {
+      label.dataset.status = status;
+      label.textContent = codexPlusBackendStatus.message || (status === "ok" ? "后端已连接" : "后端已断开");
+    }
+    document.querySelectorAll("[data-codex-backend-indicator]").forEach((indicator) => {
+      indicator.dataset.status = status;
+      indicator.title = status === "ok" ? "后端已连接" : status === "checking" ? "正在检查后端" : "后端已断开";
+    });
+    const repair = document.querySelector("[data-codex-backend-repair]");
+    if (repair) repair.hidden = status === "ok" || status === "checking";
+  }
+
+  function withBackendTimeout(request) {
+    return Promise.race([
+      request,
+      new Promise((resolve) => setTimeout(() => resolve({ status: "failed", message: "后端已断开" }), 2000)),
+    ]);
+  }
+
+  async function checkBackendStatus() {
+    codexPlusBackendStatus = await withBackendTimeout(postJson("/backend/status", {}));
+    renderBackendStatus();
+  }
+
+  async function repairBackend() {
+    codexPlusBackendStatus = { status: "checking", message: "正在修复后端…" };
+    renderBackendStatus();
+    try {
+      codexPlusBackendStatus = await postJson("/backend/repair", {});
+    } catch (error) {
+      codexPlusBackendStatus = { status: "failed", message: "后端修复失败" };
+    }
+    renderBackendStatus();
+  }
+
+  function scheduleBackendHeartbeat() {
+    clearInterval(window.__codexPlusBackendHeartbeat);
+    window.__codexPlusBackendHeartbeat = setInterval(checkBackendStatus, 5000);
+    checkBackendStatus();
+  }
+
+  function userScriptStatusLabel(status) {
+    return { loaded: "已加载", failed: "失败", disabled: "已禁用", not_loaded: "未加载", loading: "加载中" }[status] || status || "未知";
+  }
+
+  function renderUserScripts() {
+    const enabledToggle = document.querySelector("[data-codex-user-scripts-enabled]");
+    if (enabledToggle) enabledToggle.dataset.enabled = String(!!codexPlusUserScripts.enabled);
+    const dirs = document.querySelector("[data-codex-user-script-dirs]");
+    if (dirs) dirs.textContent = `内置：${codexPlusUserScripts.builtin_dir || "未找到"}  用户：${codexPlusUserScripts.user_dir || "未找到"}`;
+    const list = document.querySelector("[data-codex-user-script-list]");
+    if (!list) return;
+    if (!codexPlusUserScripts.scripts?.length) {
+      list.textContent = "未发现用户脚本。";
+      return;
+    }
+    list.innerHTML = codexPlusUserScripts.scripts.map((script) => `
+      <div class="codex-plus-user-script-item">
+        <div>
+          <div class="codex-plus-user-script-name">${escapeHtml(script.name || script.key)}</div>
+          <div class="codex-plus-user-script-meta">${script.source === "builtin" ? "内置" : "用户"} · ${userScriptStatusLabel(script.status)}</div>
+          ${script.error ? `<div class="codex-plus-user-script-error">${escapeHtml(script.error)}</div>` : ""}
+        </div>
+        <button type="button" class="codex-plus-toggle" data-codex-user-script-key="${escapeHtml(script.key)}" data-enabled="${String(!!script.enabled)}"><span></span></button>
+      </div>
+    `).join("");
+  }
+
+  async function loadUserScripts(path = "/user-scripts/list", payload = {}) {
+    const result = await postJson(path, payload);
+    if (result?.scripts) {
+      codexPlusUserScripts = result;
+      renderUserScripts();
+    }
+  }
+
+  function selectCodexPlusTab(tab) {
+    document.querySelectorAll("[data-codex-plus-tab]").forEach((button) => {
+      button.dataset.active = String(button.getAttribute("data-codex-plus-tab") === tab);
+    });
+    document.querySelectorAll("[data-codex-plus-panel]").forEach((panel) => {
+      panel.hidden = panel.getAttribute("data-codex-plus-panel") !== tab;
+    });
+    if (tab === "userScripts") loadUserScripts();
+  }
+
   function openCodexPlusModal() {
     document.querySelectorAll(".codex-plus-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll('[data-codex-plus-dialog="true"]').forEach((node) => node.remove());
@@ -248,32 +364,64 @@
     overlay.innerHTML = `
       <div class="codex-plus-modal-content" role="dialog" aria-modal="true" aria-label="Codex++">
         <div class="codex-plus-modal-header">
-          <div class="codex-plus-modal-title">Codex++ ${codexPlusVersion}</div>
+          <div class="codex-plus-modal-title"><span class="codex-plus-backend-indicator" data-codex-backend-indicator="true" data-status="checking"></span><span>Codex++ ${codexPlusVersion}</span></div>
           <button type="button" class="codex-plus-modal-close" aria-label="关闭">×</button>
         </div>
+        <div class="codex-plus-tabs" role="tablist" aria-label="Codex++">
+          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="home" data-active="true">主页</button>
+          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="userScripts" data-active="false">用户脚本</button>
+        </div>
         <div class="codex-plus-modal-body">
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">插件选项解锁</div><div class="codex-plus-row-description">让 API Key 模式显示并启用插件入口。</div></div>
-            <button type="button" class="codex-plus-toggle" data-codex-plus-setting="pluginEntryUnlock"><span></span></button>
+          <div class="codex-plus-panel" data-codex-plus-panel="home">
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">后端连接</div><div class="codex-plus-row-description">每 5 秒检查一次 launcher 后端状态；断开时可尝试修复后端运行。</div></div>
+              <div class="codex-plus-backend-status">
+                <div class="codex-plus-backend-label" data-codex-backend-status="true" data-status="checking">正在检查后端…</div>
+                <button type="button" class="codex-plus-backend-repair" data-codex-backend-repair="true" hidden>修复后端运行</button>
+              </div>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">插件选项解锁</div><div class="codex-plus-row-description">让 API Key 模式显示并启用插件入口。</div></div>
+              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="pluginEntryUnlock"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">特殊插件强制安装</div><div class="codex-plus-row-description">解除 App unavailable / 应用不可用导致的前端安装禁用。</div></div>
+              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="forcePluginInstall"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">会话删除</div><div class="codex-plus-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
+              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="sessionDelete"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">原生菜单栏位置</div><div class="codex-plus-row-description">把 Codex++ 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
+              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="nativeMenuPlacement"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">打开 DevTools</div><div class="codex-plus-row-description">打开当前 Codex 页面开发者工具，方便查看用户脚本报错。</div></div>
+              <button type="button" class="codex-plus-action-button" data-codex-open-devtools="true">打开 DevTools</button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">关于 Codex++</div><div class="codex-plus-about">Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>GitHub: <a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a></div></div>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">提出问题</div><div class="codex-plus-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
+              <button type="button" class="codex-plus-issue-button" data-codex-plus-issue="true">提出问题</button>
+            </div>
           </div>
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">特殊插件强制安装</div><div class="codex-plus-row-description">解除 App unavailable / 应用不可用导致的前端安装禁用。</div></div>
-            <button type="button" class="codex-plus-toggle" data-codex-plus-setting="forcePluginInstall"><span></span></button>
-          </div>
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">会话删除</div><div class="codex-plus-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
-            <button type="button" class="codex-plus-toggle" data-codex-plus-setting="sessionDelete"><span></span></button>
-          </div>
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">原生菜单栏位置</div><div class="codex-plus-row-description">把 Codex++ 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
-            <button type="button" class="codex-plus-toggle" data-codex-plus-setting="nativeMenuPlacement"><span></span></button>
-          </div>
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">关于 Codex++</div><div class="codex-plus-about">Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>GitHub: <a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a></div></div>
-          </div>
-          <div class="codex-plus-row">
-            <div><div class="codex-plus-row-title">提出问题</div><div class="codex-plus-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
-            <button type="button" class="codex-plus-issue-button" data-codex-plus-issue="true">提出问题</button>
+          <div class="codex-plus-panel" data-codex-plus-panel="userScripts" hidden>
+            <div class="codex-plus-row" data-codex-user-scripts-section="true">
+              <div>
+                <div class="codex-plus-row-title">用户脚本</div>
+                <div class="codex-plus-row-description">启用用户脚本：自动加载内置目录和用户配置目录中的 .js 文件。</div>
+                <div class="codex-plus-user-script-warning">禁用后需重载页面或重启 Codex++ 才能完全移除已执行效果。</div>
+                <div class="codex-plus-user-script-dirs" data-codex-user-script-dirs="true">正在读取脚本目录…</div>
+                <div class="codex-plus-user-script-list" data-codex-user-script-list="true">正在读取用户脚本…</div>
+              </div>
+              <div class="codex-plus-user-script-actions">
+                <button type="button" class="codex-plus-toggle" data-codex-user-scripts-enabled="true"><span></span></button>
+                <button type="button" class="codex-plus-user-script-reload" data-codex-user-scripts-reload="true">重新加载用户脚本</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -283,10 +431,37 @@
         overlay.remove();
         return;
       }
+      const tabButton = event.target.closest("[data-codex-plus-tab]");
+      if (tabButton) {
+        selectCodexPlusTab(tabButton.getAttribute("data-codex-plus-tab"));
+        return;
+      }
+      if (event.target.closest("[data-codex-open-devtools]")) {
+        postJson("/devtools/open", {});
+        return;
+      }
+      if (event.target.closest("[data-codex-backend-repair]")) {
+        repairBackend();
+        return;
+      }
       const issueButton = event.target.closest("[data-codex-plus-issue]");
       if (issueButton) {
         const issueUrl = "https://github.com/BigPizzaV3/CodexPlusPlus/issues";
         window.open(issueUrl, "_blank");
+        return;
+      }
+      const userScriptsEnabled = event.target.closest("[data-codex-user-scripts-enabled]");
+      if (userScriptsEnabled) {
+        loadUserScripts("/user-scripts/set-enabled", { enabled: userScriptsEnabled.dataset.enabled !== "true" });
+        return;
+      }
+      const userScriptToggle = event.target.closest("[data-codex-user-script-key]");
+      if (userScriptToggle) {
+        loadUserScripts("/user-scripts/set-script-enabled", { key: userScriptToggle.getAttribute("data-codex-user-script-key"), enabled: userScriptToggle.dataset.enabled !== "true" });
+        return;
+      }
+      if (event.target.closest("[data-codex-user-scripts-reload]")) {
+        loadUserScripts("/user-scripts/reload", {});
         return;
       }
       const toggle = event.target.closest("[data-codex-plus-setting]");
@@ -296,6 +471,8 @@
     }, true);
     document.body.appendChild(overlay);
     renderCodexPlusMenu();
+    renderBackendStatus();
+    loadUserScripts();
   }
 
   function findNativeMenuInsertionPoint() {
@@ -349,6 +526,11 @@
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.textContent = `Codex++ ${codexPlusVersion}`;
+    const indicator = document.createElement("span");
+    indicator.className = "codex-plus-backend-indicator";
+    indicator.dataset.codexBackendIndicator = "true";
+    indicator.dataset.status = codexPlusBackendStatus.status || "checking";
+    trigger.prepend(indicator);
     const nativeButtonClass = insertionPoint?.nativeButtonClass || "codex-plus-trigger";
     configureCodexPlusTrigger(menu, trigger, nativeButtonClass);
     menu.appendChild(trigger);
@@ -898,6 +1080,7 @@
   function scanLightweight() {
     installStyle();
     installCodexPlusMenu();
+    scheduleBackendHeartbeat();
     installDeleteButtonEventDelegation();
   }
 

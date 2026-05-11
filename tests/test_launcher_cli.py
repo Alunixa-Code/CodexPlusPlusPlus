@@ -195,9 +195,10 @@ def test_launch_retries_injection_until_codex_page_is_ready(monkeypatch, tmp_pat
         attempts.append(args)
         if len(attempts) == 1:
             raise RuntimeError("CDP page not ready")
-        return {"result": {}}
+        return launcher.cdp.InjectionResult(websocket_url="ws://page", bridge_socket=None, result={"result": {}})
 
     monkeypatch.setattr(launcher, "inject_file", inject_after_retry)
+    monkeypatch.setattr(launcher, "evaluate_user_scripts", lambda websocket_url, script: None)
     monkeypatch.setattr(launcher.time, "sleep", lambda seconds: None)
 
     server, proc = launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)

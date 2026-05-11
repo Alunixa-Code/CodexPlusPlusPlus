@@ -290,10 +290,54 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "bodyJsonString" not in text
     assert "forceChatGPTAuthForFastMode" not in text
     assert "codex-fast-mode-row" not in text
+
+
+def test_renderer_script_includes_user_script_manager_ui_contract():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "用户脚本" in text
+    assert "启用用户脚本" in text
+    assert "重新加载用户脚本" in text
+    assert "禁用后需重载页面或重启 Codex++" in text
+    assert "codexPlusUserScripts" in text
+    assert "loadUserScripts" in text
+    assert "renderUserScripts" in text
+    assert "data-codex-user-scripts-enabled" in text
+    assert "data-codex-user-script-key" in text
+    assert "data-codex-user-scripts-reload" in text
+    assert "/user-scripts/list" in text
+    assert "/user-scripts/set-enabled" in text
+    assert "/user-scripts/set-script-enabled" in text
+    assert "/user-scripts/reload" in text
+    assert "codex-plus-tab-button" in text
+    assert "data-codex-plus-tab=\"home\"" in text
+    assert "data-codex-plus-tab=\"userScripts\"" in text
+    assert "data-codex-plus-panel=\"home\"" in text
+    assert "data-codex-plus-panel=\"userScripts\"" in text
+    assert "selectCodexPlusTab" in text
+    assert "打开 DevTools" in text
+    assert "data-codex-open-devtools" in text
+    assert "/devtools/open" in text
+    assert "后端连接" in text
+    assert "data-codex-backend-status" in text
+    assert "data-codex-backend-repair" in text
+    assert "checkBackendStatus" in text
+    assert "renderBackendStatus" in text
+    assert "scheduleBackendHeartbeat" in text
+    assert "setInterval(checkBackendStatus, 5000)" in text
+    assert "scheduleBackendHeartbeat();\n    loadUserScripts();" not in text
+    assert "installCodexPlusMenu();\n    scheduleBackendHeartbeat();" in text
+    assert "withBackendTimeout" in text
+    assert "setTimeout(() => resolve({ status: \"failed\", message: \"后端已断开\" }), 2000)" in text
+    assert "data-codex-backend-indicator" in text
+    assert "codex-plus-backend-indicator" in text
+    assert "/backend/status" in text
+    assert "/backend/repair" in text
+
     assert "setAuthMethod(\"chatgpt\")" in text
     assert "patchFastModeGateOnObject" not in text
     assert "Codex++" in text
-    assert "codexPlusVersion = \"1.0.4\"" in text
+    assert "codexPlusVersion = \"1.0.5\"" in text
     assert "Codex++ ${codexPlusVersion}" in text
     assert "提出问题" in text
     assert "https://github.com/BigPizzaV3/CodexPlusPlus/issues" in text

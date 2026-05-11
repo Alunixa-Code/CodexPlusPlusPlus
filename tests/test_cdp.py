@@ -1,7 +1,11 @@
 import json
+import webbrowser
+from pathlib import Path
+
+import codex_session_delete.cdp as cdp
 import websocket
 
-from codex_session_delete.cdp import BRIDGE_BINDING_NAME, _bridge_loop, build_bridge_script, list_targets, pick_page_target
+from codex_session_delete.cdp import BRIDGE_BINDING_NAME, _bridge_loop, build_bridge_script, evaluate_user_scripts, install_bridge, list_targets, open_devtools, pick_page_target
 
 
 class TimeoutThenMessageSocket:
@@ -22,6 +26,34 @@ class TimeoutThenMessageSocket:
 
     def send(self, payload):
         self.sent.append(payload)
+
+
+class SingleResponseSocket:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, payload):
+        self.sent.append(json.loads(payload))
+
+    def recv(self):
+        return json.dumps({"id": 1, "result": {}})
+
+    def close(self):
+        pass
+
+
+class BridgeInstallSocket:
+    def __init__(self):
+        self.sent = []
+        self.next_response_id = 1
+
+    def send(self, payload):
+        self.sent.append(json.loads(payload))
+
+    def recv(self):
+        response = {"id": self.next_response_id, "result": {}}
+        self.next_response_id += 1
+        return json.dumps(response)
 
 
 def test_pick_page_target_prefers_codex_title():
@@ -82,6 +114,29 @@ def test_build_bridge_script_installs_binding_callbacks():
 
 def test_bridge_binding_name_is_versioned_for_reinjection():
     assert BRIDGE_BINDING_NAME == "codexSessionDeleteV2"
+
+
+def test_install_bridge_enables_runtime_before_adding_binding(monkeypatch):
+    ws = BridgeInstallSocket()
+    monkeypatch.setattr(websocket, "create_connection", lambda url, timeout: ws)
+    monkeypatch.setattr(cdp.threading, "Thread", lambda **kwargs: type("FakeThread", (), {"start": lambda self: None})())
+
+    install_bridge("ws://page", BRIDGE_BINDING_NAME, lambda path, payload: {})
+
+    assert ws.sent[0] == {"id": 1, "method": "Runtime.enable", "params": {}}
+    assert ws.sent[1]["method"] == "Runtime.addBinding"
+
+
+def test_open_devtools_opens_chrome_devtools_frontend(monkeypatch):
+    targets = [{"type": "page", "title": "Codex", "url": "app://codex", "id": "page-1", "webSocketDebuggerUrl": "ws://page"}]
+    opened = []
+    monkeypatch.setattr(cdp, "list_targets", lambda port: targets)
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+    result = open_devtools(9229)
+
+    assert result == {"status": "ok", "target_id": "page-1"}
+    assert opened == ["http://127.0.0.1:9229/devtools/inspector.html?ws=127.0.0.1:9229/devtools/page/page-1"]
 
 
 def test_bridge_loop_continues_after_idle_timeout():

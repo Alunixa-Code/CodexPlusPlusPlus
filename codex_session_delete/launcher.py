@@ -8,16 +8,19 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from codex_session_delete import cdp
 from codex_session_delete.app_paths import resolve_codex_app_dir
 from codex_session_delete.api_adapter import ApiAdapter, UnavailableApiAdapter
 from codex_session_delete.backup_store import BackupStore
-from codex_session_delete.cdp import inject_file
+from codex_session_delete.cdp import evaluate_user_scripts, inject_file, open_devtools
 from codex_session_delete.helper_server import HelperServer
 from codex_session_delete.models import DeleteResult, DeleteStatus, SessionRef
 from codex_session_delete.storage_adapter import SQLiteStorageAdapter
+from codex_session_delete.user_scripts import UserScriptManager
 
 
 class ApiFirstDeleteService:
@@ -46,6 +49,36 @@ class ApiFirstDeleteService:
 
 class InjectedHelperServer(HelperServer):
     bridge_socket: Any = None
+
+
+@dataclass
+class CodexPlusRuntime:
+    websocket_url: str | None
+    user_scripts: UserScriptManager
+    debug_port: int | None = None
+
+    def reload_user_scripts(self) -> dict[str, object]:
+        if self.websocket_url:
+            evaluate_user_scripts(self.websocket_url, self.user_scripts.build_enabled_bundle())
+        return self.user_scripts.inventory()
+
+    def open_devtools(self) -> dict[str, object]:
+        if self.debug_port is None:
+            return {"status": "failed", "message": "No debug port configured"}
+        return open_devtools(self.debug_port)
+
+    def backend_status(self) -> dict[str, object]:
+        return {"status": "ok", "message": "后端已连接"}
+
+    def repair_backend(self) -> dict[str, object]:
+        return self.backend_status()
+
+
+def user_scripts_config_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        return Path(base) / "Codex++" if base else Path.home() / "AppData" / "Roaming" / "Codex++"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "Codex++"
 
 
 def _can_bind_loopback_port(port: int) -> bool:
@@ -243,11 +276,14 @@ def shutdown_helper(server: HelperServer) -> None:
     server.server_close()
 
 
-def inject_with_retry(debug_port: int, script_path: Path, helper_port: int, service: ApiFirstDeleteService, attempts: int = 20, delay: float = 0.5) -> Any:
+def inject_with_retry(debug_port: int, script_path: Path, helper_port: int, service: ApiFirstDeleteService, runtime: CodexPlusRuntime, attempts: int = 20, delay: float = 0.5) -> Any:
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
-            return inject_file(debug_port, script_path, helper_port, lambda path, payload: handle_bridge_request(service, path, payload))
+            injection = inject_file(debug_port, script_path, helper_port, lambda path, payload: handle_bridge_request(service, path, payload, runtime))
+            runtime.websocket_url = injection.websocket_url
+            evaluate_user_scripts(injection.websocket_url, runtime.user_scripts.build_enabled_bundle())
+            return injection.bridge_socket or injection.result
         except Exception as exc:
             last_error = exc
             time.sleep(delay)
@@ -263,12 +299,16 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
     debug_port = select_windows_loopback_port(debug_port)
     helper_port = select_windows_loopback_port(helper_port)
     service = ApiFirstDeleteService(UnavailableApiAdapter(), db_path, backup_dir)
+    script_path = Path(__file__).parent / "inject" / "renderer-inject.js"
+    builtin_user_scripts_dir = Path(__file__).parent / "user_scripts"
+    user_config_dir = user_scripts_config_dir()
+    user_script_manager = UserScriptManager(builtin_user_scripts_dir, user_config_dir / "user_scripts", user_config_dir / "user_scripts.json")
+    runtime = CodexPlusRuntime(None, user_script_manager, debug_port)
     server = start_helper(service, port=helper_port)
     codex_proc = None
     try:
         codex_proc = launch_codex_app(resolved_app_dir, debug_port)
-        script_path = Path(__file__).parent / "inject" / "renderer-inject.js"
-        server.bridge_socket = inject_with_retry(debug_port, script_path, server.port, service)
+        server.bridge_socket = inject_with_retry(debug_port, script_path, server.port, service, runtime)
         return server, codex_proc
     except Exception:
         shutdown_helper(server)
@@ -296,7 +336,23 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
         raise
 
 
-def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: dict[str, object]) -> dict[str, object]:
+def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: dict[str, object], runtime: CodexPlusRuntime | None = None) -> dict[str, object]:
+    if path == "/user-scripts/list" and runtime:
+        return runtime.user_scripts.inventory()
+    if path == "/user-scripts/set-enabled" and runtime:
+        runtime.user_scripts.set_global_enabled(bool(payload.get("enabled", True)))
+        return runtime.user_scripts.inventory()
+    if path == "/user-scripts/set-script-enabled" and runtime:
+        runtime.user_scripts.set_script_enabled(str(payload.get("key", "")), bool(payload.get("enabled", True)))
+        return runtime.user_scripts.inventory()
+    if path == "/user-scripts/reload" and runtime:
+        return runtime.reload_user_scripts()
+    if path == "/devtools/open" and runtime:
+        return runtime.open_devtools()
+    if path == "/backend/status" and runtime:
+        return runtime.backend_status()
+    if path == "/backend/repair" and runtime:
+        return runtime.repair_backend()
     if path == "/delete":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return service.delete(session).to_dict()

@@ -1,0 +1,77 @@
+from codex_session_delete.launcher import handle_bridge_request
+from codex_session_delete.user_scripts import UserScriptManager
+
+
+class FakeDeleteService:
+    def delete(self, session):
+        raise AssertionError("delete should not be called")
+
+    def undo(self, undo_token):
+        raise AssertionError("undo should not be called")
+
+    def find_archived_thread_by_title(self, title):
+        return None
+
+
+class FakeRuntime:
+    def __init__(self, manager):
+        self.user_scripts = manager
+        self.injected = []
+        self.devtools_opened = False
+        self.repaired = False
+
+    def reload_user_scripts(self):
+        bundle = self.user_scripts.build_enabled_bundle()
+        self.injected.append(bundle)
+        return self.user_scripts.inventory()
+
+    def open_devtools(self):
+        self.devtools_opened = True
+        return {"status": "ok"}
+
+    def backend_status(self):
+        return {"status": "ok", "message": "后端已连接"}
+
+    def repair_backend(self):
+        self.repaired = True
+        return {"status": "ok", "message": "后端已修复"}
+
+
+def test_handle_bridge_request_lists_user_scripts(tmp_path):
+    builtin = tmp_path / "builtin"
+    user = tmp_path / "user"
+    builtin.mkdir()
+    (builtin / "demo.js").write_text("window.demo = true;", encoding="utf-8")
+    manager = UserScriptManager(builtin, user, tmp_path / "config.json")
+    runtime = FakeRuntime(manager)
+
+    result = handle_bridge_request(FakeDeleteService(), "/user-scripts/list", {}, runtime)
+
+    assert result["enabled"] is True
+    assert result["scripts"][0]["key"] == "builtin:demo.js"
+
+
+def test_handle_bridge_request_updates_user_script_toggles(tmp_path):
+    manager = UserScriptManager(tmp_path / "builtin", tmp_path / "user", tmp_path / "config.json")
+    runtime = FakeRuntime(manager)
+
+    global_result = handle_bridge_request(FakeDeleteService(), "/user-scripts/set-enabled", {"enabled": False}, runtime)
+    script_result = handle_bridge_request(FakeDeleteService(), "/user-scripts/set-script-enabled", {"key": "user:a.js", "enabled": False}, runtime)
+
+    assert global_result["enabled"] is False
+    assert script_result["scripts"] == []
+    assert manager.load_config().scripts["user:a.js"] is False
+
+
+def test_handle_bridge_request_reports_and_repairs_backend_status(tmp_path):
+    manager = UserScriptManager(tmp_path / "builtin", tmp_path / "user", tmp_path / "config.json")
+    runtime = FakeRuntime(manager)
+
+    status = handle_bridge_request(FakeDeleteService(), "/backend/status", {}, runtime)
+    repaired = handle_bridge_request(FakeDeleteService(), "/backend/repair", {}, runtime)
+
+    assert status == {"status": "ok", "message": "后端已连接"}
+    assert runtime.repaired is True
+    assert repaired == {"status": "ok", "message": "后端已修复"}
+
+

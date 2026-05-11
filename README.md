@@ -61,6 +61,8 @@ Codex++ 启动后会解锁插件入口，并在会话列表悬停时显示删除
 
 顶部菜单栏会出现 `Codex++`，点击后可以打开配置界面：
 
+![Codex++ 后端状态指示灯](docs/images/backend-status-indicator.png)
+
 ![Codex++ 配置界面](docs/images/settings-panel.png)
 
 ## 讨论交流
