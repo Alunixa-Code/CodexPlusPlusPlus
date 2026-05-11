@@ -121,14 +121,25 @@ def wait_for_shutdown(server: HelperServer, codex_proc) -> None:
 def stop_existing_windows_launchers() -> None:
     if sys.platform != "win32":
         return
-    current_pid = os.getpid()
+    # Protect our own process AND every ancestor up the chain. venv's python.exe
+    # is a stub that re-spawns a second python.exe child (same CommandLine), and
+    # shells/bash also carry launcher command lines in their ancestry. Killing
+    # any of them (e.g. the stub parent) tears down stdio for the real worker
+    # and aborts the launch before Codex is activated.
     script = (
+        "$self = [int]$env:CODEX_PLUS_PLUS_PID; "
+        "$protect = New-Object System.Collections.Generic.HashSet[int]; "
+        "$cur = $self; "
+        "while ($cur -ne 0 -and $protect.Add($cur)) { "
+        "$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$cur\" -ErrorAction SilentlyContinue; "
+        "if ($null -eq $p) { break }; $cur = [int]$p.ParentProcessId "
+        "} "
         "Get-CimInstance Win32_Process | "
-        "Where-Object { $_.ProcessId -ne $env:CODEX_PLUS_PLUS_PID -and "
-        "$_.CommandLine -match 'pythonw?(.exe)?\"?\\s+-m\\s+codex_session_delete\\s+launch(\\s|$)' } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+        "Where-Object { -not $protect.Contains([int]$_.ProcessId) -and "
+        "$_.CommandLine -match 'pythonw?(\\.exe)?\"?\\s+(-[A-Za-z]+\\s+)*-m\\s+codex_session_delete\\s+launch(\\s|$)' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
-    env = {**os.environ, "CODEX_PLUS_PLUS_PID": str(current_pid)}
+    env = {**os.environ, "CODEX_PLUS_PLUS_PID": str(os.getpid())}
     subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
 
 
