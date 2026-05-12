@@ -652,6 +652,7 @@
       setCssPropIfChanged(menu, "--codex-plus-menu-top", `${headerRect.top}px`);
       setCssPropIfChanged(menu, "--codex-plus-menu-height", `${headerRect.height}px`);
     }
+    menu.style.removeProperty("--codex-plus-menu-right");
   }
 
   function installCodexPlusMenu() {
