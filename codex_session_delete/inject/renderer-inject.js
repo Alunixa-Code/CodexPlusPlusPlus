@@ -208,7 +208,7 @@
         background: #dc2626;
         color: #ffffff;
       }
-      #${codexPlusMenuId}.codex-plus-menu-floating {
+      #${codexPlusMenuId}.${codexPlusMenuFloatingClass} {
         position: fixed;
         top: var(--codex-plus-menu-top, 0);
         right: var(--codex-plus-menu-right, 140px);
