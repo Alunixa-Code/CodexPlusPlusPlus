@@ -6,6 +6,12 @@
   const projectMoveOverlayClass = "codex-project-move-overlay";
   const actionButtonClass = "codex-session-action-button";
   const actionGroupClass = "codex-session-actions";
+  const timelineClass = "codex-conversation-timeline";
+  const timelineTrackClass = "codex-conversation-timeline-track";
+  const timelineMarkerClass = "codex-conversation-timeline-marker";
+  const timelineTooltipClass = "codex-conversation-timeline-tooltip";
+  const timelineTargetClass = "codex-conversation-timeline-target";
+  const timelineQuestionLimit = 40;
   const projectMoveProjectionKey = "codexProjectMoveProjection";
   const legacyProjectMoveOverridesKey = "codexProjectMoveOverrides";
   const projectMoveProjectionTtlMs = 24 * 60 * 60 * 1000;
@@ -22,6 +28,7 @@
   const codexActionGroupVersion = "2";
   const codexArchiveRowActionsVersion = "1";
   const codexArchiveDeleteAllVersion = "2";
+  const codexConversationTimelineVersion = "1";
   const codexPlusVersion = "1.0.5";
   const codexPlusSettingsKey = "codexPlusSettings";
   window.__codexProjectMoveRuntimeId = (window.__codexProjectMoveRuntimeId || 0) + 1;
@@ -324,6 +331,72 @@
       .codex-plus-user-script-error { margin-top: 2px; color: #f87171; font-size: 11px; word-break: break-all; }
       .codex-plus-user-script-actions { display: grid; justify-items: end; gap: 8px; min-width: 120px; }
       .codex-plus-user-script-reload { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
+      .${timelineClass} {
+        position: fixed;
+        top: 72px;
+        right: 12px;
+        bottom: 28px;
+        width: 24px;
+        z-index: 2147482500;
+        pointer-events: none;
+      }
+      .${timelineTrackClass} {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: rgba(209, 213, 219, .55);
+      }
+      .${timelineMarkerClass} {
+        position: absolute;
+        left: 50%;
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 999px;
+        transform: translate(-50%, -50%);
+        background: #d1d5db;
+        cursor: pointer;
+        pointer-events: auto;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, .92);
+      }
+      .${timelineMarkerClass}:hover,
+      .${timelineMarkerClass}:focus-visible,
+      .${timelineMarkerClass}.codex-conversation-timeline-marker-active {
+        background: #8b8b8b;
+        outline: none;
+      }
+      .${timelineTooltipClass} {
+        position: absolute;
+        right: 20px;
+        top: 50%;
+        max-width: 260px;
+        transform: translateY(-50%);
+        border-radius: 8px;
+        background: rgba(80, 80, 80, .92);
+        color: #ffffff;
+        font: 600 13px system-ui, sans-serif;
+        line-height: 18px;
+        padding: 10px 12px;
+        white-space: nowrap;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .${timelineMarkerClass}:hover .${timelineTooltipClass},
+      .${timelineMarkerClass}:focus-visible .${timelineTooltipClass} {
+        opacity: 1;
+      }
+      .${timelineTargetClass} {
+        animation: codex-conversation-timeline-pulse 1.2s ease-out;
+      }
+      @keyframes codex-conversation-timeline-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(16, 163, 127, .35); }
+        100% { box-shadow: 0 0 0 14px rgba(16, 163, 127, 0); }
+      }
     `;
     document.documentElement.appendChild(style);
   }
@@ -2204,6 +2277,16 @@
     } else {
       document.body.appendChild(button);
     }
+  }
+
+  function truncateTimelineQuestion(text) {
+    const normalized = String(text || "").replace(/\s+/g, " ").trim();
+    if (normalized.length <= timelineQuestionLimit) return normalized;
+    return `${normalized.slice(0, timelineQuestionLimit)}…`;
+  }
+
+  function refreshConversationTimeline() {
+    document.querySelectorAll(`.${timelineClass}`).forEach((node) => node.remove());
   }
 
   function scanLightweight() {

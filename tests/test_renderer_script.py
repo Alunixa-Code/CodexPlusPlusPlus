@@ -47,6 +47,20 @@ def test_renderer_script_positions_delete_button_without_affecting_layout():
 
 
 
+def test_renderer_script_contains_conversation_timeline_contract():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "codex-conversation-timeline" in text
+    assert "codex-conversation-timeline-marker" in text
+    assert "codex-conversation-timeline-tooltip" in text
+    assert "codex-conversation-timeline-target" in text
+    assert "codexConversationTimelineVersion" in text
+    assert "refreshConversationTimeline" in text
+    assert "truncateTimelineQuestion" in text
+    assert "timelineQuestionLimit = 40" in text
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
