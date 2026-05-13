@@ -444,7 +444,7 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "setAuthMethod(\"chatgpt\")" in text
     assert "patchFastModeGateOnObject" not in text
     assert "Codex++" in text
-    assert "codexPlusVersion = \"1.0.5\"" in text
+    assert "codexPlusVersion = \"1.0.6\"" in text
     assert "Codex++ ${codexPlusVersion}" in text
     assert "提出问题" in text
     assert "https://github.com/BigPizzaV3/CodexPlusPlus/issues" in text
@@ -474,7 +474,7 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "codex-plus-menu-floating" in text
     assert "findNativeMenuInsertionPoint" in text
     assert "if (!codexPlusSettings().nativeMenuPlacement) return null" in text
-    assert "right: 140px" in text
+    assert "right: var(--codex-plus-menu-right, 140px)" in text
     assert "left: auto" in text
     assert "pointer-events: auto" in text
     assert "-webkit-app-region: no-drag" in text
@@ -486,9 +486,22 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "removeDuplicateCodexPlusMenus" in text
     assert "data-codex-plus-menu" in text
     assert "textContent || \"\").trim() === `Codex++ ${codexPlusVersion}`" in text
-    assert "codexPlusMenuVersion = \"5\"" in text
+    assert "codexPlusMenuVersion !== \"6\"" in text
     assert "codexPlusTriggerInstalled = \"5\"" in text
     assert ".codex-plus-trigger:hover" not in text
+
+
+def test_renderer_script_has_backend_provider_sync_toggle():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "Provider 同步" in text
+    assert "切换供应商（model_provider）时不丢任何历史会话" in text
+    assert "避免历史对话因为供应商切换而消失" in text
+    assert "data-codex-backend-setting=\"providerSyncEnabled\"" in text
+    assert "/settings/get" in text
+    assert "/settings/set" in text
+    assert "loadBackendSettings" in text
+    assert "setBackendSetting" in text
 
 
 def test_renderer_script_can_move_sidebar_threads_between_projects():

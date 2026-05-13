@@ -30,7 +30,7 @@
   const codexArchiveRowActionsVersion = "1";
   const codexArchiveDeleteAllVersion = "2";
   const codexConversationTimelineVersion = "1";
-  const codexPlusVersion = "1.0.5";
+  const codexPlusVersion = "1.0.6";
   const codexPlusSettingsKey = "codexPlusSettings";
   window.__codexProjectMoveRuntimeId = (window.__codexProjectMoveRuntimeId || 0) + 1;
   const codexProjectMoveRuntimeId = window.__codexProjectMoveRuntimeId;
@@ -479,6 +479,36 @@
     });
   }
 
+  let codexPlusBackendSettings = { providerSyncEnabled: false };
+
+  async function loadBackendSettings() {
+    try {
+      const settings = await postJson("/settings/get", {});
+      codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
+      refreshCodexPlusBackendToggles();
+    } catch (_) {
+      refreshCodexPlusBackendToggles();
+    }
+  }
+
+  async function setBackendSetting(key, value) {
+    codexPlusBackendSettings = { ...codexPlusBackendSettings, [key]: value };
+    refreshCodexPlusBackendToggles();
+    try {
+      const settings = await postJson("/settings/set", { [key]: value });
+      codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
+    } finally {
+      refreshCodexPlusBackendToggles();
+    }
+  }
+
+  function refreshCodexPlusBackendToggles() {
+    document.querySelectorAll(".codex-plus-toggle[data-codex-backend-setting]").forEach((button) => {
+      const key = button.getAttribute("data-codex-backend-setting");
+      button.dataset.enabled = String(!!codexPlusBackendSettings[key]);
+    });
+  }
+
   let codexPlusUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
   let codexPlusBackendStatus = { status: "checking", message: "正在检查后端…" };
 
@@ -620,6 +650,10 @@
               <button type="button" class="codex-plus-toggle" data-codex-plus-setting="conversationTimeline"><span></span></button>
             </div>
             <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">Provider 同步</div><div class="codex-plus-row-description">切换供应商（model_provider）时不丢任何历史会话，避免历史对话因为供应商切换而消失。</div></div>
+              <button type="button" class="codex-plus-toggle" data-codex-backend-setting="providerSyncEnabled"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
               <div><div class="codex-plus-row-title">原生菜单栏位置</div><div class="codex-plus-row-description">把 Codex++ 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
               <button type="button" class="codex-plus-toggle" data-codex-plus-setting="nativeMenuPlacement"><span></span></button>
             </div>
@@ -699,13 +733,23 @@
         return;
       }
       const toggle = target?.closest("[data-codex-plus-setting]");
-      if (!toggle) return;
-      const key = toggle.getAttribute("data-codex-plus-setting");
-      setCodexPlusSetting(key, !codexPlusSettings()[key]);
+      if (toggle) {
+        const key = toggle.getAttribute("data-codex-plus-setting");
+        setCodexPlusSetting(key, !codexPlusSettings()[key]);
+        return;
+      }
+      const backendToggle = target?.closest("[data-codex-backend-setting]");
+      if (backendToggle) {
+        const key = backendToggle.getAttribute("data-codex-backend-setting");
+        setBackendSetting(key, !codexPlusBackendSettings[key]);
+        return;
+      }
     }, true);
     document.body.appendChild(overlay);
     renderCodexPlusMenu();
+    refreshCodexPlusBackendToggles();
     renderBackendStatus();
+    loadBackendSettings();
     loadUserScripts();
   }
 
