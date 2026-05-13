@@ -19,10 +19,11 @@ Codex++ is an external enhancement launcher for the Codex App. It does not modif
 
 ## Table of Contents
 
+- [Community](#community)
+- [Quick Start](#quick-start)
 - [Highlights](#highlights)
 - [Screenshots](#screenshots)
 - [Provider Sync](#provider-sync)
-- [Community](#community)
 - [Friendly Links](#friendly-links)
 - [How It Works](#how-it-works)
 - [Requirements](#requirements)
@@ -34,6 +35,44 @@ Codex++ is an external enhancement launcher for the Codex App. It does not modif
 - [FAQ](#faq)
 - [Contributors and Stars](#contributors-and-stars)
 - [Development](#development)
+
+## Community
+
+Scan the QR code to join the Codex++ discussion group, report issues, share usage notes, or suggest features:
+
+<img src="docs/images/discussion-group-qr.jpg" alt="Codex++ discussion group QR code" width="260">
+
+## Quick Start
+
+Windows users can double-click this file in the project root:
+
+```text
+setup.bat
+```
+
+Then choose:
+
+```text
+[1] Install Codex++
+```
+
+After setup, a `Codex++.lnk` shortcut is created on the desktop. Double-click it to launch Codex with Codex++ enhancements.
+
+You can also install and launch from the command line:
+
+```bash
+python -m pip install -e .
+python -m codex_session_delete setup
+python -m codex_session_delete launch
+```
+
+macOS users can run:
+
+```bash
+python -m codex_session_delete setup
+```
+
+This creates `/Applications/Codex++.app`.
 
 ## Highlights
 
@@ -79,12 +118,6 @@ Use it when:
 - Windows paths with a `\\?\` prefix prevent Desktop project matching.
 
 Provider Sync only fixes metadata related to conversation visibility. It does not rewrite message content. If Codex is holding a file lock or SQLite is busy, Codex++ skips the busy item and keeps launching Codex instead of blocking startup.
-
-## Community
-
-Scan the QR code to join the Codex++ discussion group, report issues, share usage notes, or suggest features:
-
-<img src="docs/images/discussion-group-qr.jpg" alt="Codex++ discussion group QR code" width="260">
 
 ## Friendly Links
 
