@@ -2330,15 +2330,8 @@
 
   function timelineMarkerTop(question, questions) {
     if (questions.length <= 1) return 50;
-    const root = conversationTimelineRoot();
-    const rootRect = root?.getBoundingClientRect?.();
-    const nodeRect = question.node.getBoundingClientRect();
-    if (!rootRect || rootRect.height <= 0) {
-      const index = questions.indexOf(question);
-      return Math.max(2, Math.min(98, (index / (questions.length - 1)) * 100));
-    }
-    const relativeTop = nodeRect.top - rootRect.top;
-    return Math.max(2, Math.min(98, (relativeTop / rootRect.height) * 100));
+    const index = questions.indexOf(question);
+    return Math.max(2, Math.min(98, (index / (questions.length - 1)) * 100));
   }
 
   function removeConversationTimeline() {

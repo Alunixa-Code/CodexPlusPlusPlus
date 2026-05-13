@@ -120,6 +120,19 @@ def test_renderer_script_timeline_uses_stable_hover_and_scroll_behavior():
 
 
 
+def test_renderer_script_timeline_positions_all_questions_by_document_order():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("function timelineMarkerTop")
+    end = text.index("\n\n  function removeConversationTimeline", start)
+    marker_top_code = text[start:end]
+
+    assert "questions.indexOf(question)" in marker_top_code
+    assert "questions.length - 1" in marker_top_code
+    assert "relativeTop" not in marker_top_code
+    assert "getBoundingClientRect" not in marker_top_code
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
