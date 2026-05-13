@@ -2403,6 +2403,7 @@
     scheduleChatsSortCorrection();
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
     installArchivedDeleteAllButton();
+    refreshConversationTimeline();
   }
 
   function runScanStep(step) {
@@ -2420,7 +2421,7 @@
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-plus-modal-overlay, .${projectMoveOverlayClass}, #codex-plus-menu`);
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-plus-modal-overlay, .${projectMoveOverlayClass}, .${timelineClass}, .codex-conversation-timeline, #codex-plus-menu`);
   }
 
   const scanRelevantSelector = [
@@ -2430,6 +2431,9 @@
     '[data-codex-project-move-row="true"]',
     '[data-codex-archive-page-row="true"]',
     "[data-codex-archive-delete-all]",
+    '[data-message-author-role]',
+    '[data-testid="conversation-turn"]',
+    'main .prose',
     selectors.appHeader,
     selectors.archiveNav,
     selectors.disabledInstallButton,
@@ -2444,7 +2448,7 @@
   function isChatContentMutation(mutation) {
     const target = mutation.target;
     if (target?.closest?.('[data-message-author-role], [data-testid="conversation-turn"], main .prose')) {
-      return !Array.from(mutation.addedNodes).some(isScanRelevantNode) && !Array.from(mutation.removedNodes).some(isScanRelevantNode);
+      return false;
     }
     return false;
   }

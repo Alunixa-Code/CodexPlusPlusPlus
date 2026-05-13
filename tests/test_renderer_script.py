@@ -78,6 +78,30 @@ def test_renderer_script_detects_user_questions_for_timeline_without_sidebar_sca
 
 
 
+def test_renderer_script_refreshes_conversation_timeline_from_scan_loop():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    deferred_start = text.index("function scanDeferred")
+    deferred_end = text.index("\n\n  function runScanStep", deferred_start)
+    scan_deferred_code = text[deferred_start:deferred_end]
+    extension_start = text.index("function isExtensionUiNode")
+    extension_end = text.index("\n\n  const scanRelevantSelector", extension_start)
+    extension_code = text[extension_start:extension_end]
+    relevant_start = text.index("const scanRelevantSelector")
+    relevant_end = text.index("\n\n  function isScanRelevantNode", relevant_start)
+    relevant_code = text[relevant_start:relevant_end]
+    chat_start = text.index("function isChatContentMutation")
+    chat_end = text.index("\n\n  function shouldScheduleScan", chat_start)
+    chat_code = text[chat_start:chat_end]
+
+    assert "refreshConversationTimeline()" in scan_deferred_code
+    assert ".codex-conversation-timeline" in extension_code
+    assert "[data-message-author-role]" in relevant_code
+    assert "[data-testid=\"conversation-turn\"]" in relevant_code
+    assert "main .prose" in relevant_code
+    assert "return false" in chat_code
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
