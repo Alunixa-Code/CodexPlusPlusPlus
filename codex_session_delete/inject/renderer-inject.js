@@ -333,9 +333,9 @@
       .codex-plus-user-script-reload { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
       .${timelineClass} {
         position: fixed;
-        top: 72px;
+        top: calc(72px + 12px);
         right: 12px;
-        bottom: 28px;
+        bottom: calc(28px + 12px);
         width: 24px;
         z-index: 2147482500;
         pointer-events: none;
@@ -384,11 +384,14 @@
         white-space: nowrap;
         box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
         opacity: 0;
+        visibility: hidden;
         pointer-events: none;
       }
       .${timelineMarkerClass}:hover .${timelineTooltipClass},
       .${timelineMarkerClass}:focus-visible .${timelineTooltipClass} {
         opacity: 1;
+        visibility: visible;
+        z-index: 2147482501;
       }
       .${timelineTargetClass} {
         animation: codex-conversation-timeline-pulse 1.2s ease-out;
@@ -2342,6 +2345,22 @@
     document.querySelectorAll(`.${timelineClass}`).forEach((node) => node.remove());
   }
 
+  function nearestTimelineScroller(node) {
+    for (let current = node?.parentElement; current; current = current.parentElement) {
+      const style = getComputedStyle(current);
+      if (/(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight) return current;
+    }
+    return document.querySelector(".thread-scroll-container") || document.scrollingElement || document.documentElement;
+  }
+
+  function scrollTimelineTarget(node) {
+    const scroller = nearestTimelineScroller(node);
+    const scrollerRect = scroller.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const nextTop = scroller.scrollTop + nodeRect.top - scrollerRect.top - (scroller.clientHeight / 2) + (nodeRect.height / 2);
+    scroller.scrollTo({ top: nextTop, behavior: "smooth" });
+  }
+
   function highlightTimelineTarget(node) {
     node.classList.remove(timelineTargetClass);
     void node.offsetWidth;
@@ -2362,16 +2381,18 @@
     tooltip.className = timelineTooltipClass;
     tooltip.textContent = truncateTimelineQuestion(question.text);
     marker.appendChild(tooltip);
-    marker.addEventListener("click", (event) => {
+    const activateMarker = (event) => {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
       document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
         node.classList.remove("codex-conversation-timeline-marker-active");
       });
       marker.classList.add("codex-conversation-timeline-marker-active");
-      question.node.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrollTimelineTarget(question.node);
       highlightTimelineTarget(question.node);
-    });
+    };
+    marker.addEventListener("pointerup", activateMarker, true);
     return marker;
   }
 

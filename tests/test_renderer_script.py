@@ -105,6 +105,21 @@ def test_renderer_script_refreshes_conversation_timeline_from_scan_loop():
 
 
 
+def test_renderer_script_timeline_uses_stable_hover_and_scroll_behavior():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "top: calc(72px + 12px)" in text
+    assert "bottom: calc(28px + 12px)" in text
+    assert "z-index: 2147482501" in text
+    assert "pointer-events: none" in text
+    assert "scrollTimelineTarget" in text
+    assert "nearestTimelineScroller" in text
+    assert "scrollTo({" in text
+    assert "behavior: \"smooth\"" in text
+    assert "click" not in text[text.index("function createConversationTimelineMarker"):text.index("\n\n  function refreshConversationTimeline")]
+    assert "pointerup" in text[text.index("function createConversationTimelineMarker"):text.index("\n\n  function refreshConversationTimeline")]
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
