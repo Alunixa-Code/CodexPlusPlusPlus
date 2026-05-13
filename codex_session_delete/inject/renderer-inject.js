@@ -2285,8 +2285,106 @@
     return `${normalized.slice(0, timelineQuestionLimit)}…`;
   }
 
-  function refreshConversationTimeline() {
+  function conversationTimelineRoot() {
+    return document.querySelector("main") || document.querySelector('[role="main"]');
+  }
+
+  function conversationTimelineQuestionCandidates(root) {
+    return Array.from(root.querySelectorAll([
+      '[data-message-author-role="user"]',
+      '[data-testid="conversation-turn"][data-message-author-role="user"]',
+      '[data-testid="conversation-turn"] [data-message-author-role="user"]',
+      '[class*="user-message"]',
+      '[class*="UserMessage"]',
+    ].join(", ")));
+  }
+
+  function extractTimelineQuestionText(node) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll("button, svg, [aria-hidden='true'], .sr-only").forEach((child) => child.remove());
+    return clone.textContent.replace(/\s+/g, " ").trim();
+  }
+
+  function conversationTimelineQuestions() {
+    const root = conversationTimelineRoot();
+    if (!root?.matches?.('main, [role="main"]')) return [];
+    const seen = new Set();
+    return conversationTimelineQuestionCandidates(root).flatMap((node) => {
+      if (node.closest('[data-app-action-sidebar-thread-id]')) return [];
+      if (isExtensionUiNode(node)) return [];
+      const target = node.closest('[data-testid="conversation-turn"]') || node;
+      if (seen.has(target)) return [];
+      seen.add(target);
+      const text = extractTimelineQuestionText(node);
+      if (!text) return [];
+      return [{ node: target, text }];
+    });
+  }
+
+  function timelineMarkerTop(question, questions) {
+    if (questions.length <= 1) return 50;
+    const root = conversationTimelineRoot();
+    const rootRect = root?.getBoundingClientRect?.();
+    const nodeRect = question.node.getBoundingClientRect();
+    if (!rootRect || rootRect.height <= 0) {
+      const index = questions.indexOf(question);
+      return Math.max(2, Math.min(98, (index / (questions.length - 1)) * 100));
+    }
+    const relativeTop = nodeRect.top - rootRect.top;
+    return Math.max(2, Math.min(98, (relativeTop / rootRect.height) * 100));
+  }
+
+  function removeConversationTimeline() {
     document.querySelectorAll(`.${timelineClass}`).forEach((node) => node.remove());
+  }
+
+  function highlightTimelineTarget(node) {
+    node.classList.remove(timelineTargetClass);
+    void node.offsetWidth;
+    node.classList.add(timelineTargetClass);
+    clearTimeout(node.__codexConversationTimelineHighlightTimer);
+    node.__codexConversationTimelineHighlightTimer = setTimeout(() => {
+      node.classList.remove(timelineTargetClass);
+    }, 1300);
+  }
+
+  function createConversationTimelineMarker(question, questions) {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = timelineMarkerClass;
+    marker.style.top = `${timelineMarkerTop(question, questions)}%`;
+    marker.setAttribute("aria-label", truncateTimelineQuestion(question.text));
+    const tooltip = document.createElement("span");
+    tooltip.className = timelineTooltipClass;
+    tooltip.textContent = truncateTimelineQuestion(question.text);
+    marker.appendChild(tooltip);
+    marker.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
+        node.classList.remove("codex-conversation-timeline-marker-active");
+      });
+      marker.classList.add("codex-conversation-timeline-marker-active");
+      question.node.scrollIntoView({ behavior: "smooth", block: "center" });
+      highlightTimelineTarget(question.node);
+    });
+    return marker;
+  }
+
+  function refreshConversationTimeline() {
+    removeConversationTimeline();
+    const questions = conversationTimelineQuestions();
+    if (questions.length === 0) return;
+    const container = document.createElement("div");
+    container.className = timelineClass;
+    container.dataset.codexConversationTimelineVersion = codexConversationTimelineVersion;
+    const track = document.createElement("div");
+    track.className = timelineTrackClass;
+    container.appendChild(track);
+    questions.forEach((question) => {
+      container.appendChild(createConversationTimelineMarker(question, questions));
+    });
+    document.body.appendChild(container);
   }
 
   function scanLightweight() {

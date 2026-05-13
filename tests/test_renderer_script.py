@@ -61,6 +61,23 @@ def test_renderer_script_contains_conversation_timeline_contract():
 
 
 
+def test_renderer_script_detects_user_questions_for_timeline_without_sidebar_scan():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("function conversationTimelineQuestions")
+    end = text.index("\n\n  function refreshConversationTimeline", start)
+    timeline_detection_code = text[start:end]
+
+    assert "conversationTimelineRoot" in timeline_detection_code
+    assert "conversationTimelineQuestionCandidates" in timeline_detection_code
+    assert "data-message-author-role=\"user\"" in text
+    assert "data-testid=\"conversation-turn\"" in text
+    assert "main" in timeline_detection_code
+    assert "selectors.sidebarThread" not in timeline_detection_code
+    assert "document.body.textContent" not in timeline_detection_code
+    assert "extractTimelineQuestionText" in timeline_detection_code
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
