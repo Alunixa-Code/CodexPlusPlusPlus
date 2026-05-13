@@ -22,6 +22,7 @@
   const styleId = "codex-delete-style";
   const codexDeleteStyleVersion = "7";
   const codexPlusMenuId = "codex-plus-menu";
+  const codexPlusMenuFloatingClass = "codex-plus-menu-floating";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
   const codexProjectMoveVersion = "1";
@@ -207,21 +208,26 @@
         background: #ffffff;
         color: #111827;
         font: 13px system-ui, sans-serif;
+        cursor: pointer;
       }
       .codex-delete-confirm-actions [data-codex-delete-confirm="true"] {
         border-color: #ef4444;
         background: #dc2626;
+        color: #ffffff;
       }
-      #${codexPlusMenuId}.codex-plus-menu-floating {
+      #${codexPlusMenuId}.${codexPlusMenuFloatingClass} {
         position: fixed;
-        top: 0;
-        right: 140px;
+        top: var(--codex-plus-menu-top, 0);
+        right: var(--codex-plus-menu-right, 140px);
         left: auto;
         z-index: 2147483645;
-        height: 30px;
+        height: var(--codex-plus-menu-height, 30px);
         color: #d1d5db;
         font: 13px system-ui, sans-serif;
         text-align: right;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
@@ -234,11 +240,16 @@
         -webkit-app-region: no-drag;
       }
       .codex-plus-trigger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
         border: 0;
         background: transparent;
         color: inherit;
         font: inherit;
         height: 100%;
+        line-height: 1;
         padding: 0 8px;
         cursor: pointer;
         pointer-events: auto;
@@ -730,11 +741,50 @@
     }, true);
   }
 
+  function numericCssValue(value) {
+    const parsed = Number.parseFloat(value || "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function setCssPropIfChanged(menu, prop, value) {
+    if (menu.style.getPropertyValue(prop) !== value) {
+      menu.style.setProperty(prop, value);
+    }
+  }
+
+  function updateFloatingCodexPlusMenuPosition(menu) {
+    if (!menu?.classList?.contains(codexPlusMenuFloatingClass)) return;
+    const header = document.querySelector(selectors.appHeader) || document.querySelector("header");
+    if (!header) return;
+    const toolbarButtons = Array.from(header.querySelectorAll("button"))
+      .filter((button) => !button.closest(`#${codexPlusMenuId}`))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 0 && rect.height > 0 && rect.left > window.innerWidth / 2)
+      .sort((left, right) => left.rect.left - right.rect.left);
+    const anchor = toolbarButtons[0];
+    if (anchor) {
+      const measuredGap = toolbarButtons[1] ? toolbarButtons[1].rect.left - toolbarButtons[0].rect.right : 0;
+      const styles = anchor.button.parentElement ? getComputedStyle(anchor.button.parentElement) : null;
+      const gap = Math.max(numericCssValue(styles?.columnGap || styles?.gap), measuredGap, 0);
+      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${anchor.rect.top}px`);
+      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${anchor.rect.height}px`);
+      setCssPropIfChanged(menu, "--codex-plus-menu-right", `${Math.max(0, window.innerWidth - anchor.rect.left + gap)}px`);
+      return;
+    }
+
+    const headerRect = header.getBoundingClientRect();
+    if (headerRect.height) {
+      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${headerRect.top}px`);
+      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${headerRect.height}px`);
+    }
+    menu.style.removeProperty("--codex-plus-menu-right");
+  }
+
   function installCodexPlusMenu() {
     const existing = document.getElementById(codexPlusMenuId);
     removeDuplicateCodexPlusMenus(existing);
     let insertionPoint = findNativeMenuInsertionPoint();
-    if (existing && existing.dataset.codexPlusMenuVersion !== "5") {
+    if (existing && existing.dataset.codexPlusMenuVersion !== "6") {
       existing.remove();
       insertionPoint = findNativeMenuInsertionPoint();
     } else if (existing && insertionPoint && existing.parentElement === insertionPoint.parent) {
@@ -745,7 +795,7 @@
     const menu = document.createElement("div");
     menu.id = codexPlusMenuId;
     menu.dataset.codexPlusMenu = "true";
-    menu.dataset.codexPlusMenuVersion = "5";
+    menu.dataset.codexPlusMenuVersion = "6";
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.textContent = `Codex++ ${codexPlusVersion}`;
@@ -762,8 +812,9 @@
       const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
       insertionPoint.parent.insertBefore(menu, safeBefore);
     } else {
-      menu.className = "codex-plus-menu-floating";
+      menu.className = codexPlusMenuFloatingClass;
       document.documentElement.appendChild(menu);
+      updateFloatingCodexPlusMenuPosition(menu);
     }
     removeDuplicateCodexPlusMenus(menu);
   }
@@ -2550,6 +2601,15 @@
   window.__codexProjectMoveReadProjection = readProjectMoveProjection;
   window.__codexProjectMoveTargets = projectMoveTargets;
   window.__codexProjectMoveSortChats = applyChatsSortCorrection;
+  window.removeEventListener("resize", window.__codexPlusResizeHandler);
+  let codexPlusResizeRafId = 0;
+  window.__codexPlusResizeHandler = () => {
+    cancelAnimationFrame(codexPlusResizeRafId);
+    codexPlusResizeRafId = requestAnimationFrame(() =>
+      updateFloatingCodexPlusMenuPosition(document.getElementById(codexPlusMenuId))
+    );
+  };
+  window.addEventListener("resize", window.__codexPlusResizeHandler);
   window.__codexSessionDeleteObserver?.disconnect();
   window.__codexSessionDeleteObserver = new MutationObserver(scheduleScan);
   window.__codexSessionDeleteObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
