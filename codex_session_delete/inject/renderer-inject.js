@@ -245,6 +245,8 @@
         align-items: center;
         justify-content: center;
         background: rgba(0,0,0,.45);
+        pointer-events: auto;
+        -webkit-app-region: no-drag;
       }
       .codex-plus-modal-content {
         width: min(520px, calc(100vw - 48px));
@@ -258,6 +260,8 @@
         color: #f3f4f6;
         font: 14px system-ui, sans-serif;
         box-shadow: 0 24px 80px rgba(0,0,0,.45);
+        pointer-events: auto;
+        -webkit-app-region: no-drag;
       }
       .codex-plus-modal-header {
         display: flex;
@@ -265,6 +269,7 @@
         justify-content: space-between;
         padding: 16px 20px 8px;
         flex: 0 0 auto;
+        -webkit-app-region: no-drag;
       }
       .codex-plus-modal-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 650; }
       .codex-plus-backend-indicator { width: 9px; height: 9px; border-radius: 999px; background: #a1a1aa; display: inline-block; }
@@ -276,7 +281,9 @@
         background: transparent;
         color: #d1d5db;
         font-size: 20px;
-        cursor: default;
+        cursor: pointer;
+        pointer-events: auto;
+        -webkit-app-region: no-drag;
       }
       .codex-plus-modal-body {
         flex: 1 1 auto;
@@ -555,45 +562,52 @@
         </div>
       </div>
     `;
+    const closeButton = overlay.querySelector(".codex-plus-modal-close");
+    closeButton?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      overlay.remove();
+    }, true);
     overlay.addEventListener("click", (event) => {
-      if (event.target === overlay || event.target.closest(".codex-plus-modal-close")) {
+      const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      if (event.target === overlay || target?.closest(".codex-plus-modal-close")) {
         overlay.remove();
         return;
       }
-      const tabButton = event.target.closest("[data-codex-plus-tab]");
+      const tabButton = target?.closest("[data-codex-plus-tab]");
       if (tabButton) {
         selectCodexPlusTab(tabButton.getAttribute("data-codex-plus-tab"));
         return;
       }
-      if (event.target.closest("[data-codex-open-devtools]")) {
+      if (target?.closest("[data-codex-open-devtools]")) {
         postJson("/devtools/open", {});
         return;
       }
-      if (event.target.closest("[data-codex-backend-repair]")) {
+      if (target?.closest("[data-codex-backend-repair]")) {
         repairBackend();
         return;
       }
-      const issueButton = event.target.closest("[data-codex-plus-issue]");
+      const issueButton = target?.closest("[data-codex-plus-issue]");
       if (issueButton) {
         const issueUrl = "https://github.com/BigPizzaV3/CodexPlusPlus/issues";
         window.open(issueUrl, "_blank");
         return;
       }
-      const userScriptsEnabled = event.target.closest("[data-codex-user-scripts-enabled]");
+      const userScriptsEnabled = target?.closest("[data-codex-user-scripts-enabled]");
       if (userScriptsEnabled) {
         loadUserScripts("/user-scripts/set-enabled", { enabled: userScriptsEnabled.dataset.enabled !== "true" });
         return;
       }
-      const userScriptToggle = event.target.closest("[data-codex-user-script-key]");
+      const userScriptToggle = target?.closest("[data-codex-user-script-key]");
       if (userScriptToggle) {
         loadUserScripts("/user-scripts/set-script-enabled", { key: userScriptToggle.getAttribute("data-codex-user-script-key"), enabled: userScriptToggle.dataset.enabled !== "true" });
         return;
       }
-      if (event.target.closest("[data-codex-user-scripts-reload]")) {
+      if (target?.closest("[data-codex-user-scripts-reload]")) {
         loadUserScripts("/user-scripts/reload", {});
         return;
       }
-      const toggle = event.target.closest("[data-codex-plus-setting]");
+      const toggle = target?.closest("[data-codex-plus-setting]");
       if (!toggle) return;
       const key = toggle.getAttribute("data-codex-plus-setting");
       setCodexPlusSetting(key, !codexPlusSettings()[key]);
