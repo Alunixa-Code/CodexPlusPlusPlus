@@ -695,11 +695,11 @@
             <div class="codex-plus-sponsor-grid">
               <div class="codex-plus-sponsor-card">
                 <div class="codex-plus-sponsor-card-title">支付宝</div>
-                <img class="codex-plus-sponsor-qr" src="docs/images/sponsor-alipay.jpg" alt="支付宝赞赏码">
+                <img class="codex-plus-sponsor-qr" src="${window.__CODEX_PLUS_SPONSOR_IMAGES__?.alipay || `${helperBase}/assets/sponsor-alipay.jpg`}" alt="支付宝赞赏码">
               </div>
               <div class="codex-plus-sponsor-card">
                 <div class="codex-plus-sponsor-card-title">微信</div>
-                <img class="codex-plus-sponsor-qr" src="docs/images/sponsor-wechat.jpg" alt="微信赞赏码">
+                <img class="codex-plus-sponsor-qr" src="${window.__CODEX_PLUS_SPONSOR_IMAGES__?.wechat || `${helperBase}/assets/sponsor-wechat.jpg`}" alt="微信赞赏码">
               </div>
             </div>
           </div>

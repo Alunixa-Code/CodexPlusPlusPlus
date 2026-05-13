@@ -498,8 +498,8 @@ def test_renderer_script_has_sponsor_tab():
     assert "赞赏" in text
     assert "请我喝杯咖啡" in text
     assert "data-codex-plus-panel=\"sponsor\"" in text
-    assert "docs/images/sponsor-alipay.jpg" in text
-    assert "docs/images/sponsor-wechat.jpg" in text
+    assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.alipay" in text
+    assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.wechat" in text
     assert "codex-plus-sponsor-grid" in text
     assert "codex-plus-sponsor-qr" in text
 
