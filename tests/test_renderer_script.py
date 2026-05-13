@@ -71,6 +71,9 @@ def test_renderer_script_detects_user_questions_for_timeline_without_sidebar_sca
     assert "conversationTimelineQuestionCandidates" in timeline_detection_code
     assert "data-message-author-role=\"user\"" in text
     assert "data-testid=\"conversation-turn\"" in text
+    assert "thread-scroll-container" in text
+    assert "bg-token-foreground/5" in text
+    assert "items-end" in text
     assert "main" in timeline_detection_code
     assert "selectors.sidebarThread" not in timeline_detection_code
     assert "document.body.textContent" not in timeline_detection_code

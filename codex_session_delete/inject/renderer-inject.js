@@ -2286,17 +2286,21 @@
   }
 
   function conversationTimelineRoot() {
-    return document.querySelector("main") || document.querySelector('[role="main"]');
+    return document.querySelector(".thread-scroll-container") || document.querySelector("main") || document.querySelector('[role="main"]');
   }
 
   function conversationTimelineQuestionCandidates(root) {
-    return Array.from(root.querySelectorAll([
+    const explicitCandidates = Array.from(root.querySelectorAll([
       '[data-message-author-role="user"]',
       '[data-testid="conversation-turn"][data-message-author-role="user"]',
       '[data-testid="conversation-turn"] [data-message-author-role="user"]',
       '[class*="user-message"]',
       '[class*="UserMessage"]',
     ].join(", ")));
+    const codexUserBubbles = Array.from(root.querySelectorAll(".group.flex.w-full.flex-col.items-end.justify-end.gap-1")).flatMap((group) => {
+      return Array.from(group.children).filter((child) => String(child.className || "").includes("bg-token-foreground/5"));
+    });
+    return [...explicitCandidates, ...codexUserBubbles];
   }
 
   function extractTimelineQuestionText(node) {
@@ -2307,7 +2311,7 @@
 
   function conversationTimelineQuestions() {
     const root = conversationTimelineRoot();
-    if (!root?.matches?.('main, [role="main"]')) return [];
+    if (!root?.matches?.('.thread-scroll-container, main, [role="main"]')) return [];
     const seen = new Set();
     return conversationTimelineQuestionCandidates(root).flatMap((node) => {
       if (node.closest('[data-app-action-sidebar-thread-id]')) return [];
