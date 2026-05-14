@@ -310,57 +310,55 @@ def count_array_changes(previous: list[str], next_values: list[str]) -> int:
     return sum(1 for index in range(compared) if (previous[index] if index < len(previous) else None) != (next_values[index] if index < len(next_values) else None))
 
 
-def normalized_global_state(state: dict[str, object]) -> tuple[list[str], list[str], object, object]:
-    saved_roots = path_array(state.get("electron-saved-workspace-roots"))
-    project_order = path_array(state.get("project-order"))
-    active_roots = path_array(state.get("active-workspace-roots"))
-    next_saved_roots = dedupe_paths(
-        [*project_order, *saved_roots, *active_roots] if project_order else [*saved_roots, *active_roots]
-    )
-    next_project_order = dedupe_paths([*project_order, *saved_roots] if project_order else next_saved_roots)
-    next_active_roots = dedupe_paths(active_roots)
-    original_active_value = state.get("active-workspace-roots")
-    next_active_value: object
-    if isinstance(original_active_value, list):
-        next_active_value = next_active_roots
-    else:
-        next_active_value = next_active_roots[0] if next_active_roots else original_active_value
-    next_labels = resolve_global_state_keyed_paths(state.get("electron-workspace-root-labels"))
-    return next_saved_roots, next_project_order, next_active_value, next_labels
+def normalize_active_workspace_roots(value: object) -> object:
+    if isinstance(value, list):
+        return dedupe_paths(value)
+    normalized = dedupe_paths(path_array(value))
+    return normalized[0] if normalized else value
+
+
+def normalized_global_state(state: dict[str, object]) -> dict[str, object]:
+    next_state: dict[str, object] = {}
+    if "electron-saved-workspace-roots" in state:
+        next_state["electron-saved-workspace-roots"] = dedupe_paths(path_array(state.get("electron-saved-workspace-roots")))
+    if "project-order" in state:
+        next_state["project-order"] = dedupe_paths(path_array(state.get("project-order")))
+    if "active-workspace-roots" in state:
+        next_state["active-workspace-roots"] = normalize_active_workspace_roots(state.get("active-workspace-roots"))
+    if "electron-workspace-root-labels" in state:
+        next_state["electron-workspace-root-labels"] = resolve_global_state_keyed_paths(state.get("electron-workspace-root-labels"))
+    return next_state
+
+
+def count_global_state_changes(state: dict[str, object], next_state: dict[str, object]) -> int:
+    total = 0
+    for key in ("electron-saved-workspace-roots", "project-order"):
+        if key in next_state:
+            total += count_array_changes(path_array(state.get(key)), next_state[key] if isinstance(next_state[key], list) else path_array(next_state[key]))
+    if "active-workspace-roots" in next_state:
+        original_active_value = state.get("active-workspace-roots")
+        next_active_value = next_state["active-workspace-roots"]
+        if isinstance(original_active_value, list):
+            total += count_array_changes(path_array(original_active_value), next_active_value if isinstance(next_active_value, list) else path_array(next_active_value))
+        elif original_active_value != next_active_value:
+            total += 1
+    if "electron-workspace-root-labels" in next_state:
+        total += 1 if next_state["electron-workspace-root-labels"] != state.get("electron-workspace-root-labels") else 0
+    return total
 
 
 def count_global_state_updates(global_state_path: Path) -> int:
     state = load_global_state(global_state_path)
-    next_saved_roots, next_project_order, next_active_value, next_labels = normalized_global_state(state)
-    total = count_array_changes(path_array(state.get("electron-saved-workspace-roots")), next_saved_roots)
-    total += count_array_changes(path_array(state.get("project-order")), next_project_order)
-    original_active_value = state.get("active-workspace-roots")
-    if isinstance(original_active_value, list):
-        total += count_array_changes(path_array(original_active_value), next_active_value if isinstance(next_active_value, list) else [])
-    elif original_active_value != next_active_value:
-        total += 1
-    if "electron-workspace-root-labels" in state:
-        total += 1 if next_labels != state.get("electron-workspace-root-labels") else 0
-    return total
+    next_state = normalized_global_state(state)
+    return count_global_state_changes(state, next_state)
 
 
 def apply_global_state_update(global_state_path: Path) -> int:
     state = load_global_state(global_state_path)
-    next_saved_roots, next_project_order, next_active_value, next_labels = normalized_global_state(state)
-    total = count_array_changes(path_array(state.get("electron-saved-workspace-roots")), next_saved_roots)
-    total += count_array_changes(path_array(state.get("project-order")), next_project_order)
-    original_active_value = state.get("active-workspace-roots")
-    if isinstance(original_active_value, list):
-        total += count_array_changes(path_array(original_active_value), next_active_value if isinstance(next_active_value, list) else [])
-    elif original_active_value != next_active_value:
-        total += 1
-    state["electron-saved-workspace-roots"] = next_saved_roots
-    state["project-order"] = next_project_order
-    state["active-workspace-roots"] = next_active_value
-    if "electron-workspace-root-labels" in state:
-        if next_labels != state.get("electron-workspace-root-labels"):
-            state["electron-workspace-root-labels"] = next_labels
-            total += 1
+    next_state = normalized_global_state(state)
+    total = count_global_state_changes(state, next_state)
+    for key, value in next_state.items():
+        state[key] = value
     if total:
         global_state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     return total
