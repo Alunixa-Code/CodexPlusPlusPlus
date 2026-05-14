@@ -62,14 +62,14 @@ def run_provider_sync(codex_home: Path | None = None) -> ProviderSyncResult:
         thread_ids_with_user_events = {change.thread_id for change in changes if change.thread_id and change.has_user_event}
         cwd_by_thread_id = {change.thread_id: change.cwd for change in changes if change.thread_id and change.cwd}
         sqlite_update_count = count_sqlite_updates(home / "state_5.sqlite", target_provider, thread_ids_with_user_events, cwd_by_thread_id)
-        global_state_update_count = count_global_state_updates(home / ".codex-global-state.json", cwd_by_thread_id)
+        global_state_update_count = count_global_state_updates(home / ".codex-global-state.json")
         if not rewrite_changes and sqlite_update_count == 0 and global_state_update_count == 0:
             return ProviderSyncResult(ProviderSyncStatus.SYNCED, "Provider sync already up to date", target_provider)
         backup_dir = create_backup(home, target_provider, rewrite_changes)
         try:
             apply_session_changes(rewrite_changes)
             sqlite_rows_updated = apply_sqlite_update(home / "state_5.sqlite", target_provider, thread_ids_with_user_events, cwd_by_thread_id)
-            apply_global_state_update(home / ".codex-global-state.json", cwd_by_thread_id)
+            apply_global_state_update(home / ".codex-global-state.json")
             prune_backups(home)
         except Exception:
             restore_session_changes(rewrite_changes)
@@ -287,10 +287,6 @@ def dedupe_paths(paths: list[str]) -> list[str]:
     return result
 
 
-def normalized_workspace_roots(cwd_by_thread_id: dict[str | None, str]) -> list[str]:
-    return dedupe_paths([cwd for cwd in cwd_by_thread_id.values() if cwd])
-
-
 def path_array(value: object) -> list[str]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, str) and item.strip()]
@@ -309,43 +305,59 @@ def resolve_global_state_keyed_paths(value: object) -> object:
     return result
 
 
-def append_missing_values(values: object, additions: list[str]) -> tuple[list[str], int]:
-    current = path_array(values)
-    next_values = dedupe_paths([*current, *additions])
-    return next_values, count_array_changes(current, next_values)
-
-
 def count_array_changes(previous: list[str], next_values: list[str]) -> int:
     compared = max(len(previous), len(next_values))
     return sum(1 for index in range(compared) if (previous[index] if index < len(previous) else None) != (next_values[index] if index < len(next_values) else None))
 
 
-def count_global_state_updates(global_state_path: Path, cwd_by_thread_id: dict[str | None, str]) -> int:
-    roots = normalized_workspace_roots(cwd_by_thread_id)
-    if not roots:
-        return 0
+def normalized_global_state(state: dict[str, object]) -> tuple[list[str], list[str], object, object]:
+    saved_roots = path_array(state.get("electron-saved-workspace-roots"))
+    project_order = path_array(state.get("project-order"))
+    active_roots = path_array(state.get("active-workspace-roots"))
+    next_saved_roots = dedupe_paths(
+        [*project_order, *saved_roots, *active_roots] if project_order else [*saved_roots, *active_roots]
+    )
+    next_project_order = dedupe_paths([*project_order, *saved_roots] if project_order else next_saved_roots)
+    next_active_roots = dedupe_paths(active_roots)
+    original_active_value = state.get("active-workspace-roots")
+    next_active_value: object
+    if isinstance(original_active_value, list):
+        next_active_value = next_active_roots
+    else:
+        next_active_value = next_active_roots[0] if next_active_roots else original_active_value
+    next_labels = resolve_global_state_keyed_paths(state.get("electron-workspace-root-labels"))
+    return next_saved_roots, next_project_order, next_active_value, next_labels
+
+
+def count_global_state_updates(global_state_path: Path) -> int:
     state = load_global_state(global_state_path)
-    total = 0
-    for key in ("electron-saved-workspace-roots", "project-order", "active-workspace-roots"):
-        _, changed = append_missing_values(state.get(key), roots)
-        total += changed
+    next_saved_roots, next_project_order, next_active_value, next_labels = normalized_global_state(state)
+    total = count_array_changes(path_array(state.get("electron-saved-workspace-roots")), next_saved_roots)
+    total += count_array_changes(path_array(state.get("project-order")), next_project_order)
+    original_active_value = state.get("active-workspace-roots")
+    if isinstance(original_active_value, list):
+        total += count_array_changes(path_array(original_active_value), next_active_value if isinstance(next_active_value, list) else [])
+    elif original_active_value != next_active_value:
+        total += 1
     if "electron-workspace-root-labels" in state:
-        next_labels = resolve_global_state_keyed_paths(state.get("electron-workspace-root-labels"))
         total += 1 if next_labels != state.get("electron-workspace-root-labels") else 0
     return total
 
 
-def apply_global_state_update(global_state_path: Path, cwd_by_thread_id: dict[str | None, str]) -> int:
-    roots = normalized_workspace_roots(cwd_by_thread_id)
-    if not roots:
-        return 0
+def apply_global_state_update(global_state_path: Path) -> int:
     state = load_global_state(global_state_path)
-    total = 0
-    for key in ("electron-saved-workspace-roots", "project-order", "active-workspace-roots"):
-        state[key], changed = append_missing_values(state.get(key), roots)
-        total += changed
+    next_saved_roots, next_project_order, next_active_value, next_labels = normalized_global_state(state)
+    total = count_array_changes(path_array(state.get("electron-saved-workspace-roots")), next_saved_roots)
+    total += count_array_changes(path_array(state.get("project-order")), next_project_order)
+    original_active_value = state.get("active-workspace-roots")
+    if isinstance(original_active_value, list):
+        total += count_array_changes(path_array(original_active_value), next_active_value if isinstance(next_active_value, list) else [])
+    elif original_active_value != next_active_value:
+        total += 1
+    state["electron-saved-workspace-roots"] = next_saved_roots
+    state["project-order"] = next_project_order
+    state["active-workspace-roots"] = next_active_value
     if "electron-workspace-root-labels" in state:
-        next_labels = resolve_global_state_keyed_paths(state.get("electron-workspace-root-labels"))
         if next_labels != state.get("electron-workspace-root-labels"):
             state["electron-workspace-root-labels"] = next_labels
             total += 1
