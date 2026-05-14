@@ -46,15 +46,14 @@ Scan the QR code to join the Codex++ discussion group, report issues, share usag
 
 ## Sponsor
 
-### RawChat | Codex Relay
-
-A long-running Codex relay provider with monthly plans, low-rate calls, high cache-hit performance, Pro/Plus account pools, and dedicated all-day maintenance.
-
-Website: [rawchat.cn](https://rawchat.cn)
-
-<p align="center">
-  <img src="docs/images/rawchat-sponsor.jpg" alt="RawChat Codex relay sponsor banner" width="620">
-</p>
+<table>
+  <tr>
+    <th>🏆 Sponsor 🏆</th>
+  </tr>
+  <tr>
+    <td>👉 <a href="https://rawchat.cn">RawChat | Codex Relay</a> A long-running Codex relay provider with monthly plans, low-rate calls, high cache-hit performance, Pro/Plus account pools, and dedicated all-day maintenance.</td>
+  </tr>
+</table>
 
 ## Support
 

@@ -101,10 +101,21 @@ def test_renderer_script_filters_expired_remote_ads():
 
 
 
+def test_renderer_script_loads_ads_through_bridge():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("async function fetchCodexPlusAds")
+    end = text.index("function selectCodexPlusTab", start)
+    fetch_code = text[start:end]
+
+    assert 'postJson("/ads", {})' in fetch_code
+    assert "fetch(" not in fetch_code
+
+
+
 def test_renderer_script_loads_ads_through_helper_origin():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "`${helperBase}/ads`" in text
+    assert "\"/ads\"" in text
     assert "raw.githubusercontent.com/BigPizzaV3/Ad-List" not in text
 
 
@@ -112,7 +123,7 @@ def test_renderer_script_loads_ads_through_helper_origin():
 def test_renderer_script_loads_ads_from_remote_json_without_local_fallback():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "`${helperBase}/ads`" in text
+    assert "\"/ads\"" in text
     assert "fetchCodexPlusAds" in text
     assert "codexPlusAds" in text
     assert "RawChat｜Codex 中转站" not in text

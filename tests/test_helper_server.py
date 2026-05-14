@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from codex_session_delete.helper_server import HelperServer
@@ -72,6 +73,66 @@ def test_helper_server_serves_remote_ad_list_from_helper_origin():
     assert {ad["type"] for ad in body["ads"]} == {"sponsor", "normal"}
     assert any(ad["url"] == "https://rawchat.cn" for ad in body["ads"])
     assert any(ad["url"] == "https://0029.org" for ad in body["ads"])
+
+
+
+def test_helper_server_tries_backup_ad_list_url_when_primary_fails():
+    class AdListHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/primary.json":
+                self.send_response(503)
+                self.end_headers()
+                return
+            if self.path == "/backup.json":
+                data = json.dumps({
+                    "version": 1,
+                    "ads": [
+                        {
+                            "id": "backup-ad",
+                            "type": "normal",
+                            "title": "Backup",
+                            "description": "Loaded from backup",
+                            "url": "https://0029.org",
+                            "highlights": [],
+                        }
+                    ],
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            return
+
+    ad_source = ThreadingHTTPServer(("127.0.0.1", 0), AdListHandler)
+    ad_thread = threading.Thread(target=ad_source.serve_forever, daemon=True)
+    ad_thread.start()
+    service = FakeDeleteService()
+    server = HelperServer(
+        "127.0.0.1",
+        0,
+        service,
+        ad_list_url=f"http://127.0.0.1:{ad_source.server_address[1]}/primary.json",
+        ad_list_backup_urls=[f"http://127.0.0.1:{ad_source.server_address[1]}/backup.json"],
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = urllib.request.Request(f"http://127.0.0.1:{server.port}/ads", method="GET")
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        ad_source.shutdown()
+        ad_thread.join(timeout=3)
+
+    assert body["ads"][0]["id"] == "backup-ad"
 
 
 

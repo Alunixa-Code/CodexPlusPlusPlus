@@ -609,7 +609,7 @@
     }
   }
 
-  const codexPlusAdsUrl = `${helperBase}/ads`;
+  const codexPlusAdsUrl = "/ads";
   let codexPlusAds = [];
   let codexPlusAdsLoaded = false;
 
@@ -668,9 +668,7 @@
 
   async function fetchCodexPlusAds() {
     try {
-      const response = await fetch(codexPlusAdsUrl, { cache: "no-store" });
-      if (!response.ok) throw new Error(`ad list ${response.status}`);
-      codexPlusAds = normalizeCodexPlusAds(await response.json());
+      codexPlusAds = normalizeCodexPlusAds(await postJson("/ads", {}));
     } catch (_) {
       codexPlusAds = [];
     } finally {
