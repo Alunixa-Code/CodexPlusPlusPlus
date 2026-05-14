@@ -72,7 +72,7 @@ def test_helper_server_serves_remote_ad_list_from_helper_origin():
     assert body["version"] == 1
     assert {ad["type"] for ad in body["ads"]} == {"sponsor", "normal"}
     assert any(ad["url"] == "https://rawchat.cn" for ad in body["ads"])
-    assert any(ad["url"] == "https://0029.org" for ad in body["ads"])
+    assert any(ad["url"] == "https://www.0029.org/?promo=AFF11F" for ad in body["ads"])
 
 
 
