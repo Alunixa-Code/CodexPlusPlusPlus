@@ -47,6 +47,103 @@ def test_renderer_script_positions_delete_button_without_affecting_layout():
 
 
 
+def test_renderer_script_contains_conversation_timeline_contract():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "codex-conversation-timeline" in text
+    assert "codex-conversation-timeline-marker" in text
+    assert "codex-conversation-timeline-tooltip" in text
+    assert "codex-conversation-timeline-target" in text
+    assert "codexConversationTimelineVersion" in text
+    assert "refreshConversationTimeline" in text
+    assert "truncateTimelineQuestion" in text
+    assert "timelineQuestionLimit = 40" in text
+
+
+
+def test_renderer_script_detects_user_questions_for_timeline_without_sidebar_scan():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("function conversationTimelineQuestions")
+    end = text.index("\n\n  function refreshConversationTimeline", start)
+    timeline_detection_code = text[start:end]
+
+    assert "conversationTimelineRoot" in timeline_detection_code
+    assert "conversationTimelineQuestionCandidates" in timeline_detection_code
+    assert "data-message-author-role=\"user\"" in text
+    assert "data-testid=\"conversation-turn\"" in text
+    assert "thread-scroll-container" in text
+    assert "bg-token-foreground/5" in text
+    assert "items-end" in text
+    assert "main" in timeline_detection_code
+    assert "selectors.sidebarThread" not in timeline_detection_code
+    assert "document.body.textContent" not in timeline_detection_code
+    assert "extractTimelineQuestionText" in timeline_detection_code
+
+
+
+def test_renderer_script_refreshes_conversation_timeline_from_scan_loop():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    deferred_start = text.index("function scanDeferred")
+    deferred_end = text.index("\n\n  function runScanStep", deferred_start)
+    scan_deferred_code = text[deferred_start:deferred_end]
+    extension_start = text.index("function isExtensionUiNode")
+    extension_end = text.index("\n\n  const scanRelevantSelector", extension_start)
+    extension_code = text[extension_start:extension_end]
+    relevant_start = text.index("const scanRelevantSelector")
+    relevant_end = text.index("\n\n  function isScanRelevantNode", relevant_start)
+    relevant_code = text[relevant_start:relevant_end]
+    chat_start = text.index("function isChatContentMutation")
+    chat_end = text.index("\n\n  function shouldScheduleScan", chat_start)
+    chat_code = text[chat_start:chat_end]
+
+    assert "refreshConversationTimeline()" in scan_deferred_code
+    assert ".codex-conversation-timeline" in extension_code
+    assert "[data-message-author-role]" in relevant_code
+    assert "[data-testid=\"conversation-turn\"]" in relevant_code
+    assert "main .prose" in relevant_code
+    assert "return false" in chat_code
+
+
+
+def test_renderer_script_timeline_uses_stable_hover_and_scroll_behavior():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "top: calc(72px + 12px)" in text
+    assert "bottom: calc(28px + 12px)" in text
+    assert "z-index: 2147482501" in text
+    assert "pointer-events: none" in text
+    assert "scrollTimelineTarget" in text
+    assert "nearestTimelineScroller" in text
+    assert "scrollTo({" in text
+    assert "behavior: \"smooth\"" in text
+    assert "click" not in text[text.index("function createConversationTimelineMarker"):text.index("\n\n  function refreshConversationTimeline")]
+    assert "pointerup" in text[text.index("function createConversationTimelineMarker"):text.index("\n\n  function refreshConversationTimeline")]
+
+
+
+def test_renderer_script_timeline_positions_all_questions_by_document_order():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("function timelineMarkerTop")
+    end = text.index("\n\n  function removeConversationTimeline", start)
+    marker_top_code = text[start:end]
+
+    assert "questions.indexOf(question)" in marker_top_code
+    assert "questions.length - 1" in marker_top_code
+    assert "relativeTop" not in marker_top_code
+    assert "getBoundingClientRect" not in marker_top_code
+
+
+
+def test_renderer_script_timeline_has_codex_plus_menu_toggle():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "conversationTimeline: true" in text
+    assert "对话 Timeline" in text
+    assert "data-codex-plus-setting=\"conversationTimeline\"" in text
+    assert "codexPlusSettings().conversationTimeline" in text
+    assert "removeConversationTimeline()" in text[text.index("function refreshConversationTimeline"):text.index("\n\n  function scanLightweight")]
+
+
+
 def test_renderer_script_enables_plugin_entry_for_api_key_users():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     start = text.index("function pluginEntryButton")
@@ -194,7 +291,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"6\"" in text
+    assert "codexDeleteStyleVersion = \"7\"" in text
     assert "right: 66px" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -347,7 +444,7 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "setAuthMethod(\"chatgpt\")" in text
     assert "patchFastModeGateOnObject" not in text
     assert "Codex++" in text
-    assert "codexPlusVersion = \"1.0.5\"" in text
+    assert "codexPlusVersion = \"1.0.6\"" in text
     assert "Codex++ ${codexPlusVersion}" in text
     assert "提出问题" in text
     assert "https://github.com/BigPizzaV3/CodexPlusPlus/issues" in text
@@ -377,7 +474,7 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "codex-plus-menu-floating" in text
     assert "findNativeMenuInsertionPoint" in text
     assert "if (!codexPlusSettings().nativeMenuPlacement) return null" in text
-    assert "right: 140px" in text
+    assert "right: var(--codex-plus-menu-right, 140px)" in text
     assert "left: auto" in text
     assert "pointer-events: auto" in text
     assert "-webkit-app-region: no-drag" in text
@@ -389,9 +486,46 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "removeDuplicateCodexPlusMenus" in text
     assert "data-codex-plus-menu" in text
     assert "textContent || \"\").trim() === `Codex++ ${codexPlusVersion}`" in text
-    assert "codexPlusMenuVersion = \"5\"" in text
+    assert "codexPlusMenuVersion !== \"6\"" in text
     assert "codexPlusTriggerInstalled = \"5\"" in text
     assert ".codex-plus-trigger:hover" not in text
+    assert "function headerTitleRegion" in text
+    assert "function isHeaderToolbarButton" in text
+    assert 'button.closest(".ms-auto.flex.shrink-0.items-center")' in text
+    assert "const titleRegion = headerTitleRegion(header);" in text
+    assert "if (titleRegion?.contains?.(button)) return false;" in text
+    assert ".map((button) => ({ button, rect: button.getBoundingClientRect() }))" in text
+    assert ".filter(({ button, rect }) => isHeaderToolbarButton(button, header, rect))" in text
+
+
+def test_renderer_script_has_sponsor_tab():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "data-codex-plus-tab=\"sponsor\"" in text
+    assert "赞赏" in text
+    assert "请我喝杯咖啡" in text
+    assert "data-codex-plus-panel=\"sponsor\"" in text
+    assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.alipay" in text
+    assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.wechat" in text
+    assert "codex-plus-sponsor-grid" in text
+    assert "codex-plus-modal-content[data-codex-plus-active-tab=\"sponsor\"]" in text
+    assert "width: min(820px, calc(100vw - 48px))" in text
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in text
+    assert "max-width: 340px" in text
+    assert "codex-plus-sponsor-qr" in text
+
+
+def test_renderer_script_has_backend_provider_sync_toggle():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "Provider 同步" in text
+    assert "切换供应商（model_provider）时不丢任何历史会话" in text
+    assert "避免历史对话因为供应商切换而消失" in text
+    assert "data-codex-backend-setting=\"providerSyncEnabled\"" in text
+    assert "/settings/get" in text
+    assert "/settings/set" in text
+    assert "loadBackendSettings" in text
+    assert "setBackendSetting" in text
 
 
 def test_renderer_script_can_move_sidebar_threads_between_projects():

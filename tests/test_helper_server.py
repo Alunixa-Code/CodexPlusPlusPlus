@@ -2,6 +2,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from importlib import resources
 
 from codex_session_delete.helper_server import HelperServer
 from codex_session_delete.models import DeleteResult, DeleteStatus, ExportResult, ExportStatus, SessionRef
@@ -194,6 +195,26 @@ def test_helper_server_returns_thread_sort_keys():
         thread.join(timeout=3)
 
     assert sort_keys == {"status": "ok", "sort_keys": [{"session_id": "s1", "updated_at_ms": 1}, {"session_id": "s2", "updated_at_ms": 2}]}
+
+
+def test_helper_server_serves_packaged_sponsor_assets():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with resources.files("codex_session_delete").joinpath("assets/sponsor-alipay.jpg").open("rb") as asset:
+            expected = asset.read()
+        request = urllib.request.Request(f"http://127.0.0.1:{server.port}/assets/sponsor-alipay.jpg", method="GET")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type")
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert body == expected
+    assert content_type == "image/jpeg"
 
 
 def test_helper_server_allows_private_network_preflight():
