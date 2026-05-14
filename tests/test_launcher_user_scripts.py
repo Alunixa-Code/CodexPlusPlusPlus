@@ -182,6 +182,132 @@ base_url = "https://relay.example.com/v1"
     assert requests[0][1]["headers"]["Authorization"] == "Bearer sk-test"
 
 
+def test_read_codex_model_catalog_reports_unsupported_responses_api(tmp_path):
+    config = tmp_path / "config.toml"
+    auth = tmp_path / "auth.json"
+    config.write_text(
+        """
+model_provider = "mycodex"
+model = "qwen3-coder"
+
+[model_providers.mycodex]
+name = "My Codex"
+base_url = "https://relay.example.com/v1"
+""".strip(),
+        encoding="utf-8",
+    )
+    auth.write_text('{"OPENAI_API_KEY":"sk-test"}', encoding="utf-8")
+    posts = []
+
+    class ModelsResponse:
+        status_code = 200
+
+        def json(self):
+            return {"data": [{"id": "qwen3-coder"}]}
+
+    class UnsupportedResponsesResponse:
+        status_code = 404
+
+        def json(self):
+            return {"error": {"message": "No route for /v1/responses"}}
+
+    def fake_post(url, **kwargs):
+        posts.append((url, kwargs))
+        return UnsupportedResponsesResponse()
+
+    result = read_codex_model_catalog(
+        config,
+        auth,
+        env={},
+        requests_get=lambda *args, **kwargs: ModelsResponse(),
+        requests_post=fake_post,
+    )
+
+    assert result["responses_api"]["status"] == "unsupported"
+    assert result["responses_api"]["endpoint"] == "https://relay.example.com/v1/responses"
+    assert result["sources"][0]["responses_api"]["status"] == "unsupported"
+    assert posts[0][0] == "https://relay.example.com/v1/responses"
+    assert posts[0][1]["json"]["model"] == "qwen3-coder"
+
+
+def test_read_codex_model_catalog_reports_incompatible_responses_payload(tmp_path):
+    config = tmp_path / "config.toml"
+    auth = tmp_path / "auth.json"
+    config.write_text(
+        """
+model_provider = "mycodex"
+
+[model_providers.mycodex]
+name = "My Codex"
+base_url = "https://relay.example.com/v1"
+api_key = "sk-test"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class ModelsResponse:
+        status_code = 200
+
+        def json(self):
+            return {"data": [{"id": "qwen3-coder"}]}
+
+    class IncompatibleResponsesResponse:
+        status_code = 400
+
+        def json(self):
+            return {"error": {"message": "Unrecognized request argument supplied: max_output_tokens"}}
+
+    result = read_codex_model_catalog(
+        config,
+        auth,
+        env={},
+        requests_get=lambda *args, **kwargs: ModelsResponse(),
+        requests_post=lambda *args, **kwargs: IncompatibleResponsesResponse(),
+    )
+
+    assert result["responses_api"]["status"] == "unsupported"
+    assert "max_output_tokens" in result["responses_api"]["message"]
+
+
+def test_read_codex_model_catalog_does_not_misreport_auth_failure_as_unsupported_responses_api(tmp_path):
+    config = tmp_path / "config.toml"
+    auth = tmp_path / "auth.json"
+    config.write_text(
+        """
+model_provider = "mycodex"
+
+[model_providers.mycodex]
+name = "My Codex"
+base_url = "https://relay.example.com/v1"
+api_key = "bad-key"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class ModelsResponse:
+        status_code = 200
+
+        def json(self):
+            return {"data": [{"id": "qwen3-coder"}]}
+
+    class AuthFailedResponse:
+        status_code = 401
+
+        def json(self):
+            return {"error": {"message": "Invalid API key"}}
+
+    result = read_codex_model_catalog(
+        config,
+        auth,
+        env={},
+        requests_get=lambda *args, **kwargs: ModelsResponse(),
+        requests_post=lambda *args, **kwargs: AuthFailedResponse(),
+    )
+
+    assert result["responses_api"]["status"] == "failed"
+    assert "Invalid API key" in result["responses_api"]["message"]
+
+
 def test_read_codex_model_catalog_merges_environment_and_config_sources(tmp_path):
     config = tmp_path / "config.toml"
     config.write_text(

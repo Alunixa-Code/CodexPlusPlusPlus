@@ -17,3 +17,9 @@ def test_renderer_script_unlocks_custom_config_model_from_model_whitelist():
     assert "patchStatsigModelWhitelist" in text
     assert "available_models" in text
     assert "patchReactModelState" in text
+    assert "/v1/responses" in text
+    assert "responses_api" in text
+    assert "codexModelCompatibilityWarningText" in text
+    assert "data-codex-model-compat-warning" in text
+    assert "maybeShowCodexModelCompatibilityWarning" in text
+    assert "showToast(text, null)" in text

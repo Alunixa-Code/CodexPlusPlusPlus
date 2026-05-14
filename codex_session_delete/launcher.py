@@ -244,6 +244,19 @@ def _models_endpoint(base_url: str) -> str:
     return f"{cleaned}/v1/models"
 
 
+def _responses_endpoint(base_url: str) -> str:
+    cleaned = _safe_url_for_status(base_url).rstrip("/")
+    if not cleaned:
+        return ""
+    if cleaned.endswith("/responses"):
+        return cleaned
+    if cleaned.endswith("/models"):
+        return f"{cleaned.removesuffix('/models')}/responses"
+    if cleaned.endswith("/v1"):
+        return f"{cleaned}/responses"
+    return f"{cleaned}/v1/responses"
+
+
 def _parse_model_payload(payload: object) -> list[str]:
     if isinstance(payload, list):
         names: list[str] = []
@@ -314,6 +327,93 @@ def _model_source_from_config(
     return OpenAICompatibleModelSource(f"config:{model_provider or name}", "config", name, base_url, api_key)
 
 
+def _response_error_message(response: Any) -> str:
+    try:
+        payload = response.json()
+    except (AttributeError, ValueError):
+        return str(getattr(response, "text", "") or "").strip()
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            return _string_config_value(error.get("message")) or _string_config_value(error.get("code")) or json.dumps(error, ensure_ascii=False)
+        if isinstance(error, str):
+            return error.strip()
+        for key in ("message", "detail", "error_description"):
+            value = _string_config_value(payload.get(key))
+            if value:
+                return value
+    return ""
+
+
+def _looks_like_unsupported_responses_api(status_code: int, message: str) -> bool:
+    if status_code in {404, 405, 410, 501}:
+        return True
+    lowered = message.lower()
+    if status_code in {400, 422} and any(field in lowered for field in ("max_output_tokens", "input")):
+        return any(phrase in lowered for phrase in ("unsupported", "unrecognized", "unknown", "not support", "invalid parameter"))
+    if "responses" not in lowered:
+        return False
+    return any(
+        phrase in lowered
+        for phrase in (
+            "not found",
+            "no route",
+            "unknown endpoint",
+            "unsupported endpoint",
+            "does not support",
+            "not support",
+            "unsupported api",
+            "unsupported path",
+        )
+    )
+
+
+def _probe_responses_api_support(source: OpenAICompatibleModelSource, model: str, requests_post: Any | None) -> dict[str, object]:
+    endpoint = _responses_endpoint(source.base_url)
+    safe_probe = {
+        "status": "unknown",
+        "endpoint": _safe_url_for_status(endpoint),
+        "model": model,
+    }
+    if requests_post is None:
+        return {**safe_probe, "message": "Responses API probe not run"}
+    if not endpoint:
+        return {**safe_probe, "message": "Missing base URL"}
+    if not source.api_key:
+        return {**safe_probe, "message": "Missing API key"}
+    if not model:
+        return {**safe_probe, "message": "No model available for Responses API probe"}
+
+    headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "CodexPlusPlus/1.0"}
+    headers["Authorization"] = f"Bearer {source.api_key}"
+    payload = {"model": model, "input": "ping", "max_output_tokens": 1}
+    try:
+        response = requests_post(endpoint, headers=headers, json=payload, timeout=8)
+    except requests.RequestException as exc:
+        return {**safe_probe, "status": "failed", "message": str(exc)}
+
+    message = _response_error_message(response)
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    if status_code < 400:
+        return {**safe_probe, "status": "supported", "message": "Responses API probe succeeded"}
+    if _looks_like_unsupported_responses_api(status_code, message):
+        return {**safe_probe, "status": "unsupported", "message": message or f"HTTP {status_code}"}
+    return {**safe_probe, "status": "failed", "message": message or f"HTTP {status_code}"}
+
+
+def _preferred_responses_api_status(
+    source_statuses: list[dict[str, object]],
+    preferred_source_id: str,
+) -> dict[str, object]:
+    if not source_statuses:
+        return {"status": "unknown", "message": "No OpenAI-compatible source configured"}
+    preferred = next((source for source in source_statuses if source.get("id") == preferred_source_id), None) or source_statuses[0]
+    responses_api = preferred.get("responses_api")
+    if isinstance(responses_api, dict):
+        return responses_api
+    return {"status": "unknown", "message": "Responses API probe not run"}
+
+
 def _fetch_models_from_source(source: OpenAICompatibleModelSource, requests_get: Any) -> tuple[list[str], dict[str, object]]:
     endpoint = _models_endpoint(source.base_url)
     safe_source = {
@@ -345,6 +445,7 @@ def read_codex_model_catalog(
     auth_path: Path | None = None,
     env: dict[str, str] | None = None,
     requests_get: Any | None = None,
+    requests_post: Any | None = None,
 ) -> dict[str, object]:
     source_env = env if env is not None else os.environ
     path, config, effective, error = _load_codex_config(config_path)
@@ -368,18 +469,23 @@ def read_codex_model_catalog(
             "provider_name": provider_name,
             "models": [],
             "sources": [],
+            "responses_api": {"status": "unknown", "message": "Config could not be read"},
         }
 
     sources = _model_sources_from_environment(source_env, auth_api_key)
     config_source = _model_source_from_config(config, effective, source_env, auth_api_key) if not error else None
+    preferred_source_id = config_source.source_id if config_source else ""
     if config_source and all(source.base_url.rstrip("/") != config_source.base_url.rstrip("/") for source in sources):
         sources.append(config_source)
 
     safe_sources: list[dict[str, object]] = []
     models: list[str] = []
     getter = requests_get or requests.get
+    poster = requests_post if requests_post is not None else (requests.post if requests_get is None else None)
     for source in sources:
         source_models, source_status = _fetch_models_from_source(source, getter)
+        probe_model = model if model in source_models else (source_models[0] if source_models else model)
+        source_status["responses_api"] = _probe_responses_api_support(source, probe_model, poster)
         models.extend(source_models)
         safe_sources.append(source_status)
 
@@ -403,6 +509,7 @@ def read_codex_model_catalog(
         "default_model": default_model,
         "models": models,
         "sources": safe_sources,
+        "responses_api": _preferred_responses_api_status(safe_sources, preferred_source_id),
     }
 
 

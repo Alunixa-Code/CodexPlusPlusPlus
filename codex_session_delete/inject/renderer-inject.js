@@ -372,6 +372,7 @@
       .codex-plus-backend-label[data-status="failed"] { color: #f87171; }
       .codex-plus-backend-repair { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
       .codex-plus-backend-repair[hidden] { display: none; }
+      .codex-plus-model-compat-warning { margin-top: 6px; color: #fbbf24; font-size: 12px; line-height: 1.45; }
       .codex-plus-user-script-warning { margin-top: 4px; color: #fbbf24; font-size: 12px; }
       .codex-plus-user-script-dirs { margin-top: 6px; color: #a1a1aa; font-size: 11px; line-height: 1.4; word-break: break-all; }
       .codex-plus-user-script-list { margin-top: 8px; display: grid; gap: 6px; }
@@ -483,6 +484,7 @@
       const key = button.getAttribute("data-codex-plus-setting");
       button.dataset.enabled = String(!!codexPlusSettings()[key]);
     });
+    renderCodexModelCompatibilityWarning();
   }
 
   let codexPlusBackendSettings = { providerSyncEnabled: false };
@@ -1083,7 +1085,7 @@
     return await window.__codexSessionDeleteBridge(path, payload);
   }
 
-  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [] };
+  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
   let codexModelCatalogLoadedAt = 0;
   let codexModelCatalogPromise = null;
   const codexPlusModelListRequestIds = new Set();
@@ -1100,19 +1102,71 @@
     ]);
   }
 
+  function codexResponsesApiStatus() {
+    const status = codexModelCatalog.responses_api;
+    return status && typeof status === "object" ? status : { status: "unknown", message: "" };
+  }
+
+  function codexModelCompatibilityWarningText() {
+    if (!codexPlusModelUnlockEnabled()) return "";
+    const responsesApi = codexResponsesApiStatus();
+    if (responsesApi.status !== "unsupported") return "";
+    const provider = codexModelCatalog.provider_name || codexModelCatalog.model_provider || "当前模型供应商";
+    const detail = responsesApi.message ? `：${responsesApi.message}` : "";
+    return `${provider} 不支持 Codex 使用的 /v1/responses 接口，模型可能能显示，但发起对话会失败。请换支持 Responses API 的中转，或使用兼容转换代理${detail}`;
+  }
+
+  function modelCompatibilityWarningElement() {
+    const toggle = document.querySelector('[data-codex-plus-setting="modelWhitelistUnlock"]');
+    const row = toggle?.closest?.(".codex-plus-row");
+    if (!row) return null;
+    let warning = row.querySelector("[data-codex-model-compat-warning]");
+    if (warning) return warning;
+    warning = document.createElement("div");
+    warning.className = "codex-plus-model-compat-warning";
+    warning.dataset.codexModelCompatWarning = "true";
+    const description = row.querySelector(".codex-plus-row-description");
+    (description?.parentElement || row).appendChild(warning);
+    return warning;
+  }
+
+  function renderCodexModelCompatibilityWarning() {
+    const text = codexModelCompatibilityWarningText();
+    document.querySelectorAll("[data-codex-model-compat-warning]").forEach((warning) => {
+      warning.hidden = !text;
+      warning.textContent = text;
+    });
+    if (!text) return;
+    const warning = modelCompatibilityWarningElement();
+    if (!warning) return;
+    warning.hidden = false;
+    warning.textContent = text;
+  }
+
+  function maybeShowCodexModelCompatibilityWarning() {
+    const text = codexModelCompatibilityWarningText();
+    if (!text) return;
+    const responsesApi = codexResponsesApiStatus();
+    const key = `${codexModelCatalog.model_provider || ""}:${responsesApi.endpoint || ""}:${responsesApi.message || ""}`;
+    if (window.__codexPlusResponsesApiWarningKey === key) return;
+    window.__codexPlusResponsesApiWarningKey = key;
+    showToast(text, null);
+  }
+
   async function loadCodexModelCatalog(force = false) {
     if (!force && codexModelCatalogPromise) return codexModelCatalogPromise;
     if (!force && codexModelCatalogLoadedAt && Date.now() - codexModelCatalogLoadedAt < 10000) return codexModelCatalog;
     codexModelCatalogPromise = postJson("/codex-model-catalog", {})
       .then((result) => {
-        codexModelCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [] };
+        codexModelCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
         codexModelCatalogLoadedAt = Date.now();
         renderCodexPlusMenu();
+        maybeShowCodexModelCompatibilityWarning();
         patchCodexModelWhitelist();
         return codexModelCatalog;
       })
       .catch((error) => {
-        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [] };
+        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", provider_name: "", models: [], sources: [], responses_api: { status: "unknown", message: "" } };
         codexModelCatalogLoadedAt = Date.now();
         return codexModelCatalog;
       })
