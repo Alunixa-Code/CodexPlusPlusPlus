@@ -281,6 +281,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
+      .codex-plus-modal-content[data-codex-plus-active-tab="sponsor"] { width: min(820px, calc(100vw - 48px)); }
       .codex-plus-modal-header {
         display: flex;
         align-items: center;
@@ -384,7 +385,7 @@
       .codex-plus-sponsor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
       .codex-plus-sponsor-card { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.04); text-align: center; }
       .codex-plus-sponsor-card-title { color: #f3f4f6; font-size: 13px; margin-bottom: 8px; }
-      .codex-plus-sponsor-qr { display: block; width: 100%; max-width: 190px; border-radius: 8px; margin: 0 auto; background: white; }
+      .codex-plus-sponsor-qr { display: block; width: 100%; max-width: 340px; border-radius: 8px; margin: 0 auto; background: white; }
       .${timelineClass} {
         position: fixed;
         top: calc(72px + 12px);
@@ -597,6 +598,9 @@
   }
 
   function selectCodexPlusTab(tab) {
+    document.querySelectorAll(".codex-plus-modal-content").forEach((modal) => {
+      modal.dataset.codexPlusActiveTab = tab;
+    });
     document.querySelectorAll("[data-codex-plus-tab]").forEach((button) => {
       button.dataset.active = String(button.getAttribute("data-codex-plus-tab") === tab);
     });
@@ -765,6 +769,7 @@
       }
     }, true);
     document.body.appendChild(overlay);
+    selectCodexPlusTab("home");
     renderCodexPlusMenu();
     refreshCodexPlusBackendToggles();
     renderBackendStatus();

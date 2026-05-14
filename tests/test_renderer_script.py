@@ -501,6 +501,10 @@ def test_renderer_script_has_sponsor_tab():
     assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.alipay" in text
     assert "window.__CODEX_PLUS_SPONSOR_IMAGES__?.wechat" in text
     assert "codex-plus-sponsor-grid" in text
+    assert "codex-plus-modal-content[data-codex-plus-active-tab=\"sponsor\"]" in text
+    assert "width: min(820px, calc(100vw - 48px))" in text
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in text
+    assert "max-width: 340px" in text
     assert "codex-plus-sponsor-qr" in text
 
 
