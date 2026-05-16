@@ -890,6 +890,16 @@
     return { parent: menuBar, before: buttons[buttons.length - 1]?.nextSibling || null, nativeButtonClass: buttons[buttons.length - 1]?.className || "" };
   }
 
+  function pageHasCodexAppChrome() {
+    return !!(
+      document.querySelector(selectors.appHeader) ||
+      document.querySelector("header") ||
+      document.querySelector(selectors.sidebarThread) ||
+      document.querySelector('[data-app-action-sidebar-section-heading="Chats"], [data-app-action-sidebar-section-heading="Projects"]') ||
+      document.querySelector(selectors.pluginNavButton)
+    );
+  }
+
   function removeDuplicateCodexPlusMenus(keep) {
     document.querySelectorAll(`#${codexPlusMenuId}, [data-codex-plus-menu="true"]`).forEach((node) => {
       if (node !== keep) node.remove();
@@ -973,6 +983,10 @@
   function installCodexPlusMenu() {
     const existing = document.getElementById(codexPlusMenuId);
     removeDuplicateCodexPlusMenus(existing);
+    if (!pageHasCodexAppChrome()) {
+      existing?.remove();
+      return;
+    }
     let insertionPoint = findNativeMenuInsertionPoint();
     if (existing && existing.dataset.codexPlusMenuVersion !== "6") {
       existing.remove();
@@ -3169,6 +3183,7 @@
     '[class*="user-message"]',
     '[class*="UserMessage"]',
     selectors.appHeader,
+    "header",
     selectors.archiveNav,
     selectors.disabledInstallButton,
   ].join(", ");

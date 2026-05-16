@@ -618,6 +618,10 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "codexPlusMenuVersion !== \"6\"" in text
     assert "codexPlusTriggerInstalled = \"5\"" in text
     assert ".codex-plus-trigger:hover" not in text
+    assert "function pageHasCodexAppChrome" in text
+    assert "if (!pageHasCodexAppChrome())" in text
+    assert "existing?.remove();" in text[text.index("function installCodexPlusMenu"):text.index("\n\n  function reactFiberFrom", text.index("function installCodexPlusMenu"))]
+    assert 'document.querySelector("header")' in text
     assert "function headerTitleRegion" in text
     assert "function isHeaderToolbarButton" in text
     assert 'button.closest(".ms-auto.flex.shrink-0.items-center")' in text
@@ -625,6 +629,9 @@ def test_renderer_script_includes_user_script_manager_ui_contract():
     assert "if (titleRegion?.contains?.(button)) return false;" in text
     assert ".map((button) => ({ button, rect: button.getBoundingClientRect() }))" in text
     assert ".filter(({ button, rect }) => isHeaderToolbarButton(button, header, rect))" in text
+    relevant_start = text.index("const scanRelevantSelector")
+    relevant_end = text.index("\n\n  function isScanRelevantNode", relevant_start)
+    assert '"header"' in text[relevant_start:relevant_end]
 
 
 def test_renderer_script_has_sponsor_tab():
