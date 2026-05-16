@@ -1,0 +1,248 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use serde::Deserialize;
+use serde_json::Value;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BackendSettings {
+    #[serde(rename = "providerSyncEnabled", default)]
+    pub provider_sync_enabled: bool,
+    #[serde(rename = "cliWrapperEnabled", default)]
+    pub cli_wrapper_enabled: bool,
+    #[serde(rename = "cliWrapperBaseUrl", default)]
+    pub cli_wrapper_base_url: String,
+    #[serde(rename = "cliWrapperApiKey", default)]
+    pub cli_wrapper_api_key: String,
+    #[serde(
+        rename = "cliWrapperApiKeyEnv",
+        default = "default_api_key_env",
+        deserialize_with = "empty_as_default_api_key_env"
+    )]
+    pub cli_wrapper_api_key_env: String,
+}
+
+impl Default for BackendSettings {
+    fn default() -> Self {
+        Self {
+            provider_sync_enabled: false,
+            cli_wrapper_enabled: false,
+            cli_wrapper_base_url: String::new(),
+            cli_wrapper_api_key: String::new(),
+            cli_wrapper_api_key_env: default_api_key_env(),
+        }
+    }
+}
+
+pub fn default_api_key_env() -> String {
+    "CUSTOM_OPENAI_API_KEY".to_string()
+}
+
+pub fn empty_as_default_api_key_env<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(default_api_key_env))
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingsStore {
+    path: PathBuf,
+}
+
+impl Default for SettingsStore {
+    fn default() -> Self {
+        Self::new(crate::paths::default_settings_path())
+    }
+}
+
+impl SettingsStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn load(&self) -> anyhow::Result<BackendSettings> {
+        let contents = match fs::read_to_string(&self.path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(BackendSettings::default());
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read settings {}", self.path.display()));
+            }
+        };
+
+        Ok(serde_json::from_str(&contents).unwrap_or_default())
+    }
+
+    pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
+        let bytes = serde_json::to_vec_pretty(settings)?;
+        atomic_write(&self.path, &bytes)
+    }
+
+    pub fn update(&self, payload: Value) -> anyhow::Result<BackendSettings> {
+        let mut settings = self.load()?;
+        if let Value::Object(map) = payload {
+            if let Some(value) = map.get("providerSyncEnabled").and_then(Value::as_bool) {
+                settings.provider_sync_enabled = value;
+            }
+            if let Some(value) = map.get("cliWrapperEnabled").and_then(Value::as_bool) {
+                settings.cli_wrapper_enabled = value;
+            }
+            if let Some(value) = map.get("cliWrapperBaseUrl").and_then(Value::as_str) {
+                settings.cli_wrapper_base_url = value.to_string();
+            }
+            if let Some(value) = map.get("cliWrapperApiKey").and_then(Value::as_str) {
+                settings.cli_wrapper_api_key = value.to_string();
+            }
+            if let Some(value) = map.get("cliWrapperApiKeyEnv").and_then(Value::as_str) {
+                settings.cli_wrapper_api_key_env = if value.is_empty() {
+                    default_api_key_env()
+                } else {
+                    value.to_string()
+                };
+            }
+        }
+
+        self.save(&settings)?;
+        Ok(settings)
+    }
+}
+
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+
+    let temp_path = temp_path_for(path);
+    fs::write(&temp_path, bytes)
+        .with_context(|| format!("failed to write temp file {}", temp_path.display()))?;
+    fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "failed to replace {} with {}",
+            path.display(),
+            temp_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    let mut temp_path = path.to_path_buf();
+    let extension = path.extension().and_then(|value| value.to_str());
+    temp_path.set_extension(match extension {
+        Some(extension) => format!("{extension}.tmp"),
+        None => "tmp".to_string(),
+    });
+    temp_path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "codex-plus-core-settings-test-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn settings_default_matches_python_behavior() {
+        let settings = BackendSettings::default();
+        assert!(!settings.provider_sync_enabled);
+        assert!(!settings.cli_wrapper_enabled);
+        assert_eq!(settings.cli_wrapper_api_key_env, "CUSTOM_OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn settings_deserialize_uses_existing_json_keys() {
+        let settings: BackendSettings = serde_json::from_str(
+            r#"{"providerSyncEnabled":true,"cliWrapperEnabled":true,"cliWrapperBaseUrl":"https://example.test","cliWrapperApiKey":"sk-test","cliWrapperApiKeyEnv":""}"#,
+        )
+        .unwrap();
+        assert!(settings.provider_sync_enabled);
+        assert!(settings.cli_wrapper_enabled);
+        assert_eq!(settings.cli_wrapper_base_url, "https://example.test");
+        assert_eq!(settings.cli_wrapper_api_key, "sk-test");
+        assert_eq!(settings.cli_wrapper_api_key_env, "CUSTOM_OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn settings_store_load_missing_file_returns_default() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+
+        assert_eq!(store.load().unwrap(), BackendSettings::default());
+    }
+
+    #[test]
+    fn settings_store_load_bad_json_returns_default() {
+        let dir = temp_dir();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "{bad json").unwrap();
+        let store = SettingsStore::new(path);
+
+        assert_eq!(store.load().unwrap(), BackendSettings::default());
+    }
+
+    #[test]
+    fn settings_store_save_load_roundtrip_uses_custom_path() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("nested").join("settings.json"));
+        let settings = BackendSettings {
+            provider_sync_enabled: true,
+            cli_wrapper_enabled: true,
+            cli_wrapper_base_url: "https://example.test".to_string(),
+            cli_wrapper_api_key: "sk-test".to_string(),
+            cli_wrapper_api_key_env: "CUSTOM_ENV".to_string(),
+        };
+
+        store.save(&settings).unwrap();
+
+        assert_eq!(store.load().unwrap(), settings);
+    }
+
+    #[test]
+    fn settings_store_update_only_mutates_present_known_fields() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        let initial = BackendSettings {
+            provider_sync_enabled: false,
+            cli_wrapper_enabled: true,
+            cli_wrapper_base_url: "https://old.test".to_string(),
+            cli_wrapper_api_key: "old-key".to_string(),
+            cli_wrapper_api_key_env: "OLD_ENV".to_string(),
+        };
+        store.save(&initial).unwrap();
+
+        let updated = store
+            .update(json!({
+                "providerSyncEnabled": true,
+                "cliWrapperApiKeyEnv": "",
+                "unknownKey": "ignored"
+            }))
+            .unwrap();
+
+        assert!(updated.provider_sync_enabled);
+        assert!(updated.cli_wrapper_enabled);
+        assert_eq!(updated.cli_wrapper_base_url, "https://old.test");
+        assert_eq!(updated.cli_wrapper_api_key, "old-key");
+        assert_eq!(updated.cli_wrapper_api_key_env, "CUSTOM_OPENAI_API_KEY");
+        assert_eq!(store.load().unwrap(), updated);
+    }
+}
