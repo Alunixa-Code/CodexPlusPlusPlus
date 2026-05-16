@@ -134,20 +134,20 @@ where
     let helper_port = hooks.select_helper_port(options.helper_port);
     let settings = hooks.load_settings().await?;
     let status_store = options.status_store.clone();
+    let mut helper_started = false;
+    let mut launched = None;
 
-    let result = async {
+    let result: anyhow::Result<LaunchHandle> = async {
         if settings.provider_sync_enabled {
             hooks.run_provider_sync().await?;
         }
 
         hooks.start_helper(helper_port).await?;
+        helper_started = true;
         let launch = hooks.launch_codex(&app_dir, debug_port).await?;
+        launched = Some(launch.clone());
 
-        if let Err(error) = hooks.inject(debug_port, helper_port).await {
-            hooks.shutdown_helper(helper_port).await;
-            hooks.terminate_codex(&launch).await;
-            return Err(error);
-        }
+        hooks.inject(debug_port, helper_port).await?;
 
         let status = launch_status(
             "running",
@@ -173,9 +173,15 @@ where
     match result {
         Ok(handle) => Ok(handle),
         Err(error) => {
+            if helper_started {
+                hooks.shutdown_helper(helper_port).await;
+            }
+            if let Some(launch) = &launched {
+                hooks.terminate_codex(launch).await;
+            }
             let message = error.to_string();
             let failure = launch_status("failed", &message, debug_port, helper_port, &app_dir);
-            status_store.save_latest(&failure)?;
+            let _ = status_store.save_latest(&failure);
             hooks.write_status("failed").await;
             Err(error)
         }
@@ -233,7 +239,7 @@ impl LaunchHooks for DefaultLaunchHooks {
     }
 
     async fn run_provider_sync(&self) -> anyhow::Result<()> {
-        Ok(())
+        anyhow::bail!("provider sync requires launcher hooks with codex-plus-data integration")
     }
 
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
@@ -359,9 +365,33 @@ impl LaunchHooks for DefaultLaunchHooks {
         }
     }
 
-    async fn terminate_codex(&self, _launch: &CodexLaunch) {
-        if let Some(mut child) = self.child.lock().await.take() {
-            let _ = child.kill().await;
+    async fn terminate_codex(&self, launch: &CodexLaunch) {
+        match launch {
+            CodexLaunch::Process {
+                wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
+                command,
+            } => {
+                if let Some(mut child) = self.child.lock().await.take() {
+                    let _ = child.kill().await;
+                }
+                if let Some(app_dir) = macos_app_dir_from_open_command(command) {
+                    let _ = run_macos_cleanup_command(&app_dir).await;
+                }
+            }
+            CodexLaunch::Process { .. } => {
+                if let Some(mut child) = self.child.lock().await.take() {
+                    let _ = child.kill().await;
+                }
+            }
+            CodexLaunch::PackagedActivation {
+                process_id: Some(process_id),
+                ..
+            } => {
+                let _ = terminate_windows_process_id(*process_id).await;
+            }
+            CodexLaunch::PackagedActivation {
+                process_id: None, ..
+            } => {}
         }
     }
 }
@@ -457,6 +487,41 @@ pub fn build_macos_open_command(app_dir: &Path, debug_port: u16) -> Vec<String> 
     command
 }
 
+pub fn build_macos_cleanup_command(app_dir: &Path) -> Vec<String> {
+    let app_name = app_dir
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Codex");
+    vec![
+        "osascript".to_string(),
+        "-e".to_string(),
+        format!(
+            r#"tell application "{}" to quit"#,
+            app_name.replace('"', "\\\"")
+        ),
+    ]
+}
+
+async fn run_macos_cleanup_command(app_dir: &Path) -> anyhow::Result<()> {
+    let command = build_macos_cleanup_command(app_dir);
+    let Some(executable) = command.first() else {
+        return Ok(());
+    };
+    let _ = Command::new(executable)
+        .args(&command[1..])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .with_context(|| format!("failed to request macOS app quit for {}", app_dir.display()))?;
+    Ok(())
+}
+
+fn macos_app_dir_from_open_command(command: &[String]) -> Option<PathBuf> {
+    let app_index = command.iter().position(|part| part == "-a")?;
+    command.get(app_index + 1).map(PathBuf::from)
+}
+
 pub fn with_temporary_proxy_environment<T>(
     env: &HashMap<String, String>,
     run: impl FnOnce() -> T,
@@ -519,9 +584,33 @@ async fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+async fn terminate_windows_process_id(process_id: u32) -> anyhow::Result<()> {
+    let script = format!(
+        "Stop-Process -Id {} -Force -ErrorAction SilentlyContinue",
+        process_id
+    );
+    let _ = Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg(script)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .with_context(|| format!("failed to terminate Windows process id {process_id}"))?;
+    Ok(())
+}
+
 #[cfg(not(windows))]
 async fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()> {
     anyhow::bail!("cannot wait for Windows process id {process_id} on this platform")
+}
+
+#[cfg(not(windows))]
+async fn terminate_windows_process_id(process_id: u32) -> anyhow::Result<()> {
+    anyhow::bail!("cannot terminate Windows process id {process_id} on this platform")
 }
 
 fn set_env_var<K, V>(key: K, value: V)

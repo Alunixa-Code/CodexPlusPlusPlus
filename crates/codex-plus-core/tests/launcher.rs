@@ -8,8 +8,8 @@ use codex_plus_core::app_paths::{
 };
 use codex_plus_core::launcher::{
     CodexLaunch, LaunchHooks, LaunchOptions, build_codex_arguments, build_codex_command,
-    build_macos_open_command, build_packaged_activation, codex_process_environment_from,
-    launch_and_inject_with_hooks, with_temporary_proxy_environment,
+    build_macos_cleanup_command, build_macos_open_command, build_packaged_activation,
+    codex_process_environment_from, launch_and_inject_with_hooks, with_temporary_proxy_environment,
 };
 use codex_plus_core::ports::select_platform_loopback_port_with;
 use codex_plus_core::proxy::{detect_local_proxy_with, has_proxy_environment};
@@ -321,12 +321,159 @@ async fn launch_lifecycle_writes_failure_and_cleans_helper_when_injection_fails(
     assert!(status.message.contains("inject failed"));
 }
 
+#[tokio::test]
+async fn launch_lifecycle_cleans_helper_when_launch_fails_after_helper_started() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone()).with_launch_error("launch failed");
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("launch failed"));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "start-helper:57321",
+            "launch:9229",
+            "shutdown-helper:57321",
+            "status:failed",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::write(temp.path().join("status-parent-file"), "not a directory").unwrap();
+    let status_store = StatusStore::new(
+        temp.path()
+            .join("status-parent-file")
+            .join("latest-status.json"),
+    );
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks =
+        FakeHooks::new(events.clone()).with_launch_result(CodexLaunch::PackagedActivation {
+            app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
+            arguments: "--remote-debugging-port=9229".to_string(),
+            process_id: Some(4242),
+        });
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store,
+        },
+        &hooks,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("failed to create directory"));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "start-helper:57321",
+            "launch:9229",
+            "inject:9229:57321",
+            "shutdown-helper:57321",
+            "terminate-packaged:4242",
+            "status:failed",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn launch_lifecycle_terminates_packaged_process_id_when_injection_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_launch_result(CodexLaunch::PackagedActivation {
+            app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
+            arguments: "--remote-debugging-port=9229".to_string(),
+            process_id: Some(4242),
+        })
+        .with_inject_error("inject failed");
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store,
+        },
+        &hooks,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("inject failed"));
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .contains(&"terminate-packaged:4242".to_string())
+    );
+}
+
+#[tokio::test]
+async fn default_provider_sync_enabled_fails_instead_of_silently_skipping() {
+    let hooks = FakeHooks::new(Arc::new(Mutex::new(Vec::new()))).with_provider_sync_unsupported();
+
+    let error = hooks
+        .run_provider_sync()
+        .await
+        .expect_err("default-style provider sync should be explicit");
+
+    assert!(
+        error
+            .to_string()
+            .contains("provider sync requires launcher hooks")
+    );
+}
+
+#[test]
+fn launcher_macos_cleanup_command_targets_specific_app_bundle() {
+    let command = build_macos_cleanup_command(Path::new("/Applications/OpenAI Codex.app"));
+
+    assert_eq!(command[0], "osascript");
+    assert!(command.iter().any(|part| part.contains("OpenAI Codex")));
+    assert!(!command.iter().any(|part| part == "Codex"));
+}
+
 #[derive(Clone)]
 struct FakeHooks {
     events: Arc<Mutex<Vec<String>>>,
     settings: BackendSettings,
     launch_result: CodexLaunch,
+    launch_error: Option<String>,
     inject_error: Option<String>,
+    provider_sync_unsupported: bool,
 }
 
 impl FakeHooks {
@@ -338,7 +485,9 @@ impl FakeHooks {
                 command: vec!["codex".to_string()],
                 wait_strategy: codex_plus_core::launcher::ProcessWaitStrategy::TrackedChild,
             },
+            launch_error: None,
             inject_error: None,
+            provider_sync_unsupported: false,
         }
     }
 
@@ -354,6 +503,16 @@ impl FakeHooks {
 
     fn with_inject_error(mut self, message: &str) -> Self {
         self.inject_error = Some(message.to_string());
+        self
+    }
+
+    fn with_launch_error(mut self, message: &str) -> Self {
+        self.launch_error = Some(message.to_string());
+        self
+    }
+
+    fn with_provider_sync_unsupported(mut self) -> Self {
+        self.provider_sync_unsupported = true;
         self
     }
 
@@ -399,6 +558,9 @@ impl LaunchHooks for FakeHooks {
 
     async fn run_provider_sync(&self) -> anyhow::Result<()> {
         self.event("provider-sync");
+        if self.provider_sync_unsupported {
+            anyhow::bail!("provider sync requires launcher hooks");
+        }
         Ok(())
     }
 
@@ -410,6 +572,9 @@ impl LaunchHooks for FakeHooks {
     async fn launch_codex(&self, app_dir: &Path, debug_port: u16) -> anyhow::Result<CodexLaunch> {
         assert!(app_dir.ends_with("Codex.app"));
         self.event(format!("launch:{debug_port}"));
+        if let Some(message) = &self.launch_error {
+            anyhow::bail!(message.clone());
+        }
         Ok(self.launch_result.clone())
     }
 
@@ -434,7 +599,11 @@ impl LaunchHooks for FakeHooks {
         self.event(format!("shutdown-helper:{helper_port}"));
     }
 
-    async fn terminate_codex(&self, _launch: &CodexLaunch) {
-        self.event("terminate-codex");
+    async fn terminate_codex(&self, launch: &CodexLaunch) {
+        if let Some(process_id) = launch.process_id() {
+            self.event(format!("terminate-packaged:{process_id}"));
+        } else {
+            self.event("terminate-codex");
+        }
     }
 }
