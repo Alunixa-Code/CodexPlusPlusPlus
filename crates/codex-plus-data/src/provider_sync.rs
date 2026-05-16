@@ -103,14 +103,24 @@ pub fn run_provider_sync(codex_home: Option<&Path>) -> ProviderSyncResult {
         }
         let backup_dir = create_backup(&home, &target_provider, &rewrite_changes)?;
         apply_session_changes(&rewrite_changes)?;
-        let sqlite_rows_updated = apply_sqlite_update(
-            &home.join("state_5.sqlite"),
-            &target_provider,
-            &thread_ids_with_user_events,
-            &cwd_by_thread_id,
-        )?;
-        apply_global_state_update(&home.join(".codex-global-state.json"))?;
-        prune_backups(&home)?;
+        let apply_result = (|| -> anyhow::Result<usize> {
+            let sqlite_rows_updated = apply_sqlite_update(
+                &home.join("state_5.sqlite"),
+                &target_provider,
+                &thread_ids_with_user_events,
+                &cwd_by_thread_id,
+            )?;
+            apply_global_state_update(&home.join(".codex-global-state.json"))?;
+            prune_backups(&home)?;
+            Ok(sqlite_rows_updated)
+        })();
+        let sqlite_rows_updated = match apply_result {
+            Ok(count) => count,
+            Err(err) => {
+                let _ = restore_session_changes(&rewrite_changes);
+                return Err(err);
+            }
+        };
         Ok(result(
             ProviderSyncStatus::Synced,
             "Provider sync complete",
@@ -359,6 +369,16 @@ fn apply_session_changes(changes: &[SessionChange]) -> anyhow::Result<()> {
         fs::write(
             &change.path,
             format!("{}{}", change.next_first_line, change.separator),
+        )?;
+    }
+    Ok(())
+}
+
+fn restore_session_changes(changes: &[SessionChange]) -> anyhow::Result<()> {
+    for change in changes {
+        fs::write(
+            &change.path,
+            format!("{}{}", change.original_first_line, change.separator),
         )?;
     }
     Ok(())

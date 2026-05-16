@@ -134,6 +134,51 @@ fn provider_sync_repairs_sqlite_when_rollout_provider_matches_and_normalizes_pat
 }
 
 #[test]
+fn provider_sync_restores_rollout_first_line_when_later_step_fails() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("config.toml"), "model_provider = \"apigather\"\n").unwrap();
+    let rollout = home.join("sessions/rollout-needs-rewrite.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let original_first_line = fs::read_to_string(&rollout)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    let db = Connection::open(home.join("state_5.sqlite")).unwrap();
+    db.execute(
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER, cwd TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('thread-1', 'old-provider', 0, 0, 'C:/old')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Skipped);
+    assert!(result.message.contains("Provider sync skipped"));
+    let restored_first_line = fs::read_to_string(&rollout)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    assert_eq!(restored_first_line, original_first_line);
+}
+
+#[test]
 fn provider_sync_skips_when_home_missing_or_lock_exists_and_prunes_backups() {
     let tmp = tempdir().unwrap();
     let missing = tmp.path().join(".missing");
