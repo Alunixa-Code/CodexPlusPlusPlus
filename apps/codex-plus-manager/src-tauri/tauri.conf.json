@@ -4,8 +4,8 @@
   "version": "1.0.8",
   "identifier": "com.bigpizzav3.codexplusplus.manager",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "beforeDevCommand": "npm run vite:dev",
+    "beforeBuildCommand": "npm run vite:build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

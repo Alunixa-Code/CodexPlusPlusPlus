@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "vite:dev": "vite --host 127.0.0.1 --port 1420",
+    "vite:build": "vite build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
