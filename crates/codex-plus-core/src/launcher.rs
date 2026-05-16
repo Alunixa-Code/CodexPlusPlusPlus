@@ -17,6 +17,7 @@ pub enum CodexLaunch {
     Process {
         command: Vec<String>,
         wait_strategy: ProcessWaitStrategy,
+        macos_cleanup_policy: Option<MacosCleanupPolicy>,
     },
     PackagedActivation {
         app_user_model_id: String,
@@ -29,6 +30,12 @@ pub enum CodexLaunch {
 pub enum ProcessWaitStrategy {
     TrackedChild,
     ExternalWaitCommand,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MacosCleanupPolicy {
+    QuitIfNotPreviouslyRunning,
+    SkipQuitBecauseAlreadyRunning,
 }
 
 impl CodexLaunch {
@@ -299,6 +306,11 @@ impl LaunchHooks for DefaultLaunchHooks {
         }
 
         if app_dir.extension().and_then(|value| value.to_str()) == Some("app") {
+            let cleanup_policy = if is_macos_app_running(app_dir).await {
+                MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning
+            } else {
+                MacosCleanupPolicy::QuitIfNotPreviouslyRunning
+            };
             let command = build_macos_open_command(app_dir, debug_port);
             let executable = command
                 .first()
@@ -314,6 +326,7 @@ impl LaunchHooks for DefaultLaunchHooks {
             return Ok(CodexLaunch::Process {
                 command,
                 wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
+                macos_cleanup_policy: Some(cleanup_policy),
             });
         }
 
@@ -332,6 +345,7 @@ impl LaunchHooks for DefaultLaunchHooks {
         Ok(CodexLaunch::Process {
             command,
             wait_strategy: ProcessWaitStrategy::TrackedChild,
+            macos_cleanup_policy: None,
         })
     }
 
@@ -370,12 +384,16 @@ impl LaunchHooks for DefaultLaunchHooks {
             CodexLaunch::Process {
                 wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
                 command,
+                macos_cleanup_policy,
             } => {
                 if let Some(mut child) = self.child.lock().await.take() {
                     let _ = child.kill().await;
                 }
-                if let Some(app_dir) = macos_app_dir_from_open_command(command) {
-                    let _ = run_macos_cleanup_command(&app_dir).await;
+                if let (Some(app_dir), Some(cleanup_policy)) = (
+                    macos_app_dir_from_open_command(command),
+                    *macos_cleanup_policy,
+                ) {
+                    let _ = run_macos_cleanup_command(&app_dir, cleanup_policy).await;
                 }
             }
             CodexLaunch::Process { .. } => {
@@ -487,23 +505,34 @@ pub fn build_macos_open_command(app_dir: &Path, debug_port: u16) -> Vec<String> 
     command
 }
 
-pub fn build_macos_cleanup_command(app_dir: &Path) -> Vec<String> {
+pub fn build_macos_cleanup_command(
+    app_dir: &Path,
+    policy: MacosCleanupPolicy,
+) -> Option<Vec<String>> {
+    if policy == MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning {
+        return None;
+    }
     let app_name = app_dir
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("Codex");
-    vec![
+    Some(vec![
         "osascript".to_string(),
         "-e".to_string(),
         format!(
             r#"tell application "{}" to quit"#,
             app_name.replace('"', "\\\"")
         ),
-    ]
+    ])
 }
 
-async fn run_macos_cleanup_command(app_dir: &Path) -> anyhow::Result<()> {
-    let command = build_macos_cleanup_command(app_dir);
+async fn run_macos_cleanup_command(
+    app_dir: &Path,
+    policy: MacosCleanupPolicy,
+) -> anyhow::Result<()> {
+    let Some(command) = build_macos_cleanup_command(app_dir, policy) else {
+        return Ok(());
+    };
     let Some(executable) = command.first() else {
         return Ok(());
     };
@@ -520,6 +549,34 @@ async fn run_macos_cleanup_command(app_dir: &Path) -> anyhow::Result<()> {
 fn macos_app_dir_from_open_command(command: &[String]) -> Option<PathBuf> {
     let app_index = command.iter().position(|part| part == "-a")?;
     command.get(app_index + 1).map(PathBuf::from)
+}
+
+async fn is_macos_app_running(app_dir: &Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let app_name = app_dir
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Codex");
+    let script = format!(
+        r#"application "{}" is running"#,
+        app_name.replace('"', "\\\"")
+    );
+    let Ok(output) = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case("true")
 }
 
 pub fn with_temporary_proxy_environment<T>(

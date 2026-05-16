@@ -7,9 +7,10 @@ use codex_plus_core::app_paths::{
     packaged_app_user_model_id, user_data_candidates_from,
 };
 use codex_plus_core::launcher::{
-    CodexLaunch, LaunchHooks, LaunchOptions, build_codex_arguments, build_codex_command,
-    build_macos_cleanup_command, build_macos_open_command, build_packaged_activation,
-    codex_process_environment_from, launch_and_inject_with_hooks, with_temporary_proxy_environment,
+    CodexLaunch, DefaultLaunchHooks, LaunchHooks, LaunchOptions, MacosCleanupPolicy,
+    build_codex_arguments, build_codex_command, build_macos_cleanup_command,
+    build_macos_open_command, build_packaged_activation, codex_process_environment_from,
+    launch_and_inject_with_hooks, with_temporary_proxy_environment,
 };
 use codex_plus_core::ports::select_platform_loopback_port_with;
 use codex_plus_core::proxy::{detect_local_proxy_with, has_proxy_environment};
@@ -238,6 +239,7 @@ async fn launch_lifecycle_runs_sync_before_launch_writes_success_and_shutdowns_o
         .with_launch_result(CodexLaunch::Process {
             command: vec!["codex".to_string()],
             wait_strategy: codex_plus_core::launcher::ProcessWaitStrategy::TrackedChild,
+            macos_cleanup_policy: None,
         });
 
     let handle = launch_and_inject_with_hooks(
@@ -459,11 +461,39 @@ async fn default_provider_sync_enabled_fails_instead_of_silently_skipping() {
 
 #[test]
 fn launcher_macos_cleanup_command_targets_specific_app_bundle() {
-    let command = build_macos_cleanup_command(Path::new("/Applications/OpenAI Codex.app"));
+    let command = build_macos_cleanup_command(
+        Path::new("/Applications/OpenAI Codex.app"),
+        MacosCleanupPolicy::QuitIfNotPreviouslyRunning,
+    )
+    .expect("cleanup command should be allowed");
 
     assert_eq!(command[0], "osascript");
     assert!(command.iter().any(|part| part.contains("OpenAI Codex")));
     assert!(!command.iter().any(|part| part == "Codex"));
+}
+
+#[test]
+fn launcher_macos_cleanup_is_skipped_when_app_was_already_running() {
+    let command = build_macos_cleanup_command(
+        Path::new("/Applications/OpenAI Codex.app"),
+        MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning,
+    );
+
+    assert_eq!(command, None);
+}
+
+#[tokio::test]
+async fn default_launch_hooks_provider_sync_enabled_returns_explicit_error() {
+    let error = DefaultLaunchHooks::default()
+        .run_provider_sync()
+        .await
+        .expect_err("default provider sync should not silently skip");
+
+    assert!(
+        error
+            .to_string()
+            .contains("provider sync requires launcher hooks")
+    );
 }
 
 #[derive(Clone)]
@@ -484,6 +514,7 @@ impl FakeHooks {
             launch_result: CodexLaunch::Process {
                 command: vec!["codex".to_string()],
                 wait_strategy: codex_plus_core::launcher::ProcessWaitStrategy::TrackedChild,
+                macos_cleanup_policy: None,
             },
             launch_error: None,
             inject_error: None,
