@@ -695,19 +695,22 @@ fn update_existing_agent_job_item(
         return Ok(false);
     }
     let id_value = OwnedSqlValue(json_to_sql_value(id));
-    let exists = db
-        .query_row(
-            "SELECT 1 FROM agent_job_items WHERE id = ?1 LIMIT 1",
-            [&id_value as &dyn ToSql],
-            |_| Ok(()),
-        )
-        .is_ok();
-    if !exists {
-        return Ok(false);
+    let current_assignment = db.query_row(
+        "SELECT assigned_thread_id FROM agent_job_items WHERE id = ?1 LIMIT 1",
+        [&id_value as &dyn ToSql],
+        |row| row.get::<_, Option<String>>(0),
+    );
+    let current_assignment = match current_assignment {
+        Ok(value) => value,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(false),
+        Err(err) => return Err(err.into()),
+    };
+    if current_assignment.is_some() {
+        anyhow::bail!("restore conflict: agent_job_items row already assigned");
     }
     let assigned = OwnedSqlValue(json_to_sql_value(&row["assigned_thread_id"]));
     db.execute(
-        "UPDATE agent_job_items SET assigned_thread_id = ?1 WHERE id = ?2",
+        "UPDATE agent_job_items SET assigned_thread_id = ?1 WHERE id = ?2 AND assigned_thread_id IS NULL",
         [&assigned as &dyn ToSql, &id_value as &dyn ToSql],
     )?;
     Ok(true)

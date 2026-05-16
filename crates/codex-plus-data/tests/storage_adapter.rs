@@ -373,6 +373,49 @@ fn delete_codex_thread_schema_removes_related_rows_file_and_undo_restores_everyt
 }
 
 #[test]
+fn undo_codex_thread_delete_fails_when_agent_job_was_reassigned() {
+    let tmp = tempdir().unwrap();
+    let db_path = tmp.path().join("state_5.sqlite");
+    let rollout_path = tmp.path().join("rollout.jsonl");
+    fs::write(&rollout_path, "{\"type\":\"message\"}\n").unwrap();
+    create_codex_thread_db(&db_path, &rollout_path);
+    let adapter = SQLiteStorageAdapter::new(&db_path, BackupStore::new(tmp.path().join("backups")));
+
+    let deleted = adapter.delete_local(&session("local:t1", "Codex Thread"));
+
+    assert_eq!(deleted.status, DeleteStatus::LocalDeleted);
+    let token = deleted.undo_token.as_deref().unwrap();
+    let db = Connection::open(&db_path).unwrap();
+    db.execute(
+        "INSERT INTO threads (id, rollout_path, title, cwd, archived, archived_at, updated_at, updated_at_ms) VALUES ('t2', NULL, 'Other Thread', '/new/project', 0, NULL, 200, 200000)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_job_items SET assigned_thread_id = 't2' WHERE id = 'job1'",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let restored = adapter.undo(token);
+
+    assert_eq!(restored.status, DeleteStatus::Failed);
+    assert_eq!(restored.undo_token.as_deref(), Some(token));
+    assert!(restored.message.to_lowercase().contains("restore conflict"));
+    let db = Connection::open(&db_path).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT assigned_thread_id FROM agent_job_items WHERE id = 'job1'",
+            [],
+            |row| row.get::<_, Option<String>>(0)
+        )
+        .unwrap(),
+        Some("t2".to_string())
+    );
+}
+
+#[test]
 fn codex_delete_rolls_back_when_related_delete_fails() {
     let tmp = tempdir().unwrap();
     let db_path = tmp.path().join("state_5.sqlite");
