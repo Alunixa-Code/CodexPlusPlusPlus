@@ -640,6 +640,7 @@ function statusLabel(status: string) {
     ok: "正常",
     running: "运行中",
     failed: "失败",
+    accepted: "已受理",
     not_checked: "未检查",
     not_implemented: "未实现",
     unknown: "未知",

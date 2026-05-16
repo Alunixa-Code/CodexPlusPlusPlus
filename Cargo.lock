@@ -402,7 +402,10 @@ dependencies = [
 name = "codex-plus-manager"
 version = "1.0.8"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "codex-plus-core",
+ "codex-plus-data",
  "directories",
  "serde",
  "serde_json",

@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use codex_plus_core::launcher::{DefaultLaunchHooks, LaunchHooks};
 use codex_plus_core::settings::{BackendSettings, SettingsStore};
 use codex_plus_core::status::{LaunchStatus, StatusStore};
 use codex_plus_core::user_scripts::UserScriptManager;
@@ -129,28 +131,45 @@ pub fn launch_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
         status_store: StatusStore::default(),
     };
 
-    let launch_result =
-        tauri::async_runtime::block_on(codex_plus_core::launcher::launch_and_inject(options));
-    match launch_result {
-        Ok(handle) => {
-            let payload = json!({
-                "appPath": handle.app_dir.to_string_lossy(),
-                "debugPort": handle.debug_port,
-                "helperPort": handle.helper_port,
-                "launchKind": launch_kind(&handle.launch)
-            });
-            let _ = std::thread::Builder::new()
-                .name("codex-plus-manager-launch-wait".to_string())
-                .spawn(move || {
+    let debug_port = request.debug_port;
+    let helper_port = request.helper_port;
+    match std::thread::Builder::new()
+        .name("codex-plus-manager-launch".to_string())
+        .spawn(move || {
+            let hooks = ManagerLaunchHooks::default();
+            let result = tauri::async_runtime::block_on(
+                codex_plus_core::launcher::launch_and_inject_with_hooks(options, &hooks),
+            );
+            match result {
+                Ok(handle) => {
                     let _ = tauri::async_runtime::block_on(handle.wait_for_codex_exit());
-                });
-            ok("Codex++ 已启动，后端注入已完成。", payload)
-        }
+                }
+                Err(error) => {
+                    let status = LaunchStatus {
+                        status: "failed".to_string(),
+                        message: format!("启动失败：{error}"),
+                        started_at_ms: now_ms(),
+                        debug_port: Some(debug_port),
+                        helper_port: Some(helper_port),
+                        codex_app: None,
+                    };
+                    let _ = StatusStore::default().save_latest(&status);
+                }
+            }
+        }) {
+        Ok(_) => CommandResult {
+            status: "accepted".to_string(),
+            message: "启动任务已在后台开始，可稍后查看概览状态。".to_string(),
+            payload: json!({
+                "debugPort": debug_port,
+                "helperPort": helper_port
+            }),
+        },
         Err(error) => failed(
-            &format!("启动失败：{error}"),
+            &format!("启动后台任务失败：{error}"),
             json!({
-                "debugPort": request.debug_port,
-                "helperPort": request.helper_port
+                "debugPort": debug_port,
+                "helperPort": helper_port
             }),
         ),
     }
@@ -158,13 +177,13 @@ pub fn launch_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
 
 #[tauri::command]
 pub fn load_settings() -> CommandResult<SettingsPayload> {
-    settings_payload("设置已加载。")
+    settings_payload("设置已加载。", "设置读取失败")
 }
 
 #[tauri::command]
 pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
     match SettingsStore::default().save(&settings) {
-        Ok(()) => settings_payload("设置已保存。"),
+        Ok(()) => settings_payload("设置已保存。", "设置保存后重新读取失败"),
         Err(error) => failed(
             &format!("保存设置失败：{error}"),
             SettingsPayload {
@@ -220,16 +239,24 @@ pub fn perform_update() -> CommandResult<Value> {
 #[tauri::command]
 pub fn read_latest_logs(request: LogRequest) -> CommandResult<LogsPayload> {
     let path = codex_plus_core::paths::default_latest_status_path();
-    let text =
-        read_tail(&path, request.lines).unwrap_or_else(|error| format!("无法读取日志：{error}"));
-    ok(
-        "日志已读取。",
-        LogsPayload {
-            path: path.to_string_lossy().to_string(),
-            text,
-            lines: request.lines,
-        },
-    )
+    match read_tail(&path, request.lines) {
+        Ok(text) => ok(
+            "日志已读取。",
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text,
+                lines: request.lines,
+            },
+        ),
+        Err(error) => failed(
+            &format!("读取日志失败：{error}"),
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text: String::new(),
+                lines: request.lines,
+            },
+        ),
+    }
 }
 
 #[tauri::command]
@@ -246,7 +273,7 @@ pub fn copy_diagnostics() -> CommandResult<DiagnosticsPayload> {
 pub fn reset_settings() -> CommandResult<SettingsPayload> {
     let settings = BackendSettings::default();
     match SettingsStore::default().save(&settings) {
-        Ok(()) => settings_payload("设置已重置为默认值。"),
+        Ok(()) => settings_payload("设置已重置为默认值。", "设置重置后重新读取失败"),
         Err(error) => failed(
             &format!("重置设置失败：{error}"),
             SettingsPayload {
@@ -260,19 +287,103 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
     }
 }
 
-fn settings_payload(message: &str) -> CommandResult<SettingsPayload> {
+fn settings_payload(message: &str, failure_context: &str) -> CommandResult<SettingsPayload> {
     let store = SettingsStore::default();
-    let settings = store.load().unwrap_or_default();
-    ok(
-        message,
-        SettingsPayload {
-            settings,
-            settings_path: codex_plus_core::paths::default_settings_path()
-                .to_string_lossy()
-                .to_string(),
-            user_scripts: user_script_inventory(),
-        },
-    )
+    let settings_path = codex_plus_core::paths::default_settings_path()
+        .to_string_lossy()
+        .to_string();
+    match store.load() {
+        Ok(settings) => ok(
+            message,
+            SettingsPayload {
+                settings,
+                settings_path,
+                user_scripts: user_script_inventory(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("{failure_context}：{error}"),
+            SettingsPayload {
+                settings: BackendSettings::default(),
+                settings_path,
+                user_scripts: user_script_inventory(),
+            },
+        ),
+    }
+}
+
+#[derive(Clone)]
+struct ManagerLaunchHooks {
+    core: Arc<DefaultLaunchHooks>,
+}
+
+impl Default for ManagerLaunchHooks {
+    fn default() -> Self {
+        Self {
+            core: Arc::new(DefaultLaunchHooks::default()),
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl LaunchHooks for ManagerLaunchHooks {
+    fn resolve_app_dir(&self, app_dir: Option<&Path>) -> anyhow::Result<PathBuf> {
+        self.core.resolve_app_dir(app_dir)
+    }
+
+    fn select_debug_port(&self, requested: u16) -> u16 {
+        self.core.select_debug_port(requested)
+    }
+
+    fn select_helper_port(&self, requested: u16) -> u16 {
+        self.core.select_helper_port(requested)
+    }
+
+    async fn load_settings(&self) -> anyhow::Result<BackendSettings> {
+        self.core.load_settings().await
+    }
+
+    async fn run_provider_sync(&self) -> anyhow::Result<()> {
+        let _ = tauri::async_runtime::spawn_blocking(|| codex_plus_data::run_provider_sync(None))
+            .await
+            .map_err(|error| anyhow::anyhow!("provider sync task failed: {error}"))?;
+        Ok(())
+    }
+
+    async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
+        self.core.start_helper(helper_port).await
+    }
+
+    async fn launch_codex(
+        &self,
+        app_dir: &Path,
+        debug_port: u16,
+    ) -> anyhow::Result<codex_plus_core::launcher::CodexLaunch> {
+        self.core.launch_codex(app_dir, debug_port).await
+    }
+
+    async fn inject(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
+        self.core.inject(debug_port, helper_port).await
+    }
+
+    async fn write_status(&self, status: &str) {
+        self.core.write_status(status).await;
+    }
+
+    async fn wait_for_codex_exit(
+        &self,
+        launch: &codex_plus_core::launcher::CodexLaunch,
+    ) -> anyhow::Result<()> {
+        self.core.wait_for_codex_exit(launch).await
+    }
+
+    async fn shutdown_helper(&self, helper_port: u16) {
+        self.core.shutdown_helper(helper_port).await;
+    }
+
+    async fn terminate_codex(&self, launch: &codex_plus_core::launcher::CodexLaunch) {
+        self.core.terminate_codex(launch).await;
+    }
 }
 
 fn user_script_inventory() -> Value {
@@ -337,6 +448,13 @@ fn diagnostics_report() -> String {
     .unwrap_or_else(|error| format!("诊断报告序列化失败：{error}"))
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 fn read_tail(path: &Path, max_lines: usize) -> std::io::Result<String> {
     let contents = fs::read_to_string(path)?;
     let mut lines = contents.lines().rev().take(max_lines).collect::<Vec<_>>();
@@ -365,13 +483,6 @@ fn shortcut_state(shortcut: install::ShortcutState) -> PathState {
             "missing".to_string()
         },
         path: shortcut.path,
-    }
-}
-
-fn launch_kind(launch: &codex_plus_core::launcher::CodexLaunch) -> &'static str {
-    match launch {
-        codex_plus_core::launcher::CodexLaunch::Process { .. } => "process",
-        codex_plus_core::launcher::CodexLaunch::PackagedActivation { .. } => "packaged_activation",
     }
 }
 
@@ -443,5 +554,24 @@ mod tests {
     fn update_commands_are_honest_stubs() {
         assert_eq!(check_update().status, "not_implemented");
         assert_eq!(perform_update().status, "not_implemented");
+    }
+
+    #[test]
+    fn manager_launch_hooks_run_provider_sync_without_default_bail() {
+        tauri::async_runtime::block_on(async {
+            ManagerLaunchHooks::default()
+                .run_provider_sync()
+                .await
+                .expect("manager hook should connect provider sync");
+        });
+    }
+
+    #[test]
+    fn missing_logs_return_failed_status() {
+        let result = read_latest_logs(LogRequest { lines: 25 });
+
+        if result.payload.text.is_empty() {
+            assert_eq!(result.status, "failed");
+        }
     }
 }
