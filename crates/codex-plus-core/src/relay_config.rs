@@ -363,7 +363,7 @@ pub fn apply_relay_profile_files_to_home_with_context(
     let config_with_limits = apply_context_limits_to_config(
         &config_with_common,
         &profile.context_window,
-        &profile.auto_compact_limit,
+        &profile.effective_auto_compact_limit(),
     )?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
     apply_relay_files_to_home(home, &config_with_catalog, &profile.auth_contents)
@@ -400,7 +400,7 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
     let config_with_limits = apply_context_limits_to_config(
         &config_with_common,
         &profile.context_window,
-        &profile.auto_compact_limit,
+        &profile.effective_auto_compact_limit(),
     )?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
 
@@ -437,7 +437,7 @@ pub fn apply_relay_profile_config_to_home_with_context(
     let config_with_limits = apply_context_limits_to_config(
         &config_with_common,
         &profile.context_window,
-        &profile.auto_compact_limit,
+        &profile.effective_auto_compact_limit(),
     )?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
     apply_relay_config_file_to_home(home, &config_with_catalog)
@@ -511,23 +511,19 @@ pub async fn test_relay_profile(
     }
 
     let client = crate::http_client::proxied_client("CodexPlusPlus/RelayTest")?;
-    let endpoint = match profile.protocol {
-        RelayProtocol::Responses => format!("{base_url}/responses"),
-        RelayProtocol::ChatCompletions => format!("{base_url}/chat/completions"),
-    };
     let test_model = model.trim();
     if test_model.is_empty() {
         anyhow::bail!("测试模型不能为空");
     }
 
     let payload = relay_profile_test_payload(profile.protocol, test_model);
-    let response = client
+    let endpoint = relay_profile_test_endpoint(profile.protocol, base_url, test_model);
+    let request = client
         .post(&endpoint)
-        .bearer_auth(api_key)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .json(&payload)
-        .send()
-        .await?;
+        .json(&payload);
+    let request = relay_profile_test_auth(request, profile.protocol, api_key);
+    let response = request.send().await?;
     let http_status = response.status().as_u16();
 
     // 如果 404 且 base_url 末尾没有 /v1，尝试自动补 /v1 后再发一次。
@@ -535,15 +531,12 @@ pub async fn test_relay_profile(
     // 用户容易遗漏这个前缀，导致 /responses 或 /chat/completions 404。
     if http_status == 404 && !base_url.ends_with("/v1") {
         let v1_url = format!("{base_url}/v1");
-        let v1_endpoint = match profile.protocol {
-            RelayProtocol::Responses => format!("{v1_url}/responses"),
-            RelayProtocol::ChatCompletions => format!("{v1_url}/chat/completions"),
-        };
-        let v1_response = client
+        let v1_endpoint = relay_profile_test_endpoint(profile.protocol, &v1_url, test_model);
+        let v1_request = client
             .post(&v1_endpoint)
-            .bearer_auth(api_key)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .json(&payload)
+            .json(&payload);
+        let v1_response = relay_profile_test_auth(v1_request, profile.protocol, api_key)
             .send()
             .await?;
         let v1_status = v1_response.status().as_u16();
@@ -569,26 +562,61 @@ pub async fn test_relay_profile(
 }
 
 fn relay_profile_test_payload(protocol: RelayProtocol, model: &str) -> Value {
+    let request = serde_json::json!({
+        "model": model,
+        "input": "hi",
+        "max_output_tokens": 16
+    });
     match protocol {
-        RelayProtocol::Responses => serde_json::json!({
-            "model": model,
-            "input": "hi",
-            "max_output_tokens": 16
-        }),
-        RelayProtocol::ChatCompletions => serde_json::json!({
-            "model": model,
-            "messages": [
-                { "role": "user", "content": "hi" }
-            ],
-            "max_tokens": 16
-        }),
+        RelayProtocol::Responses => request,
+        RelayProtocol::ChatCompletions => {
+            crate::protocol_proxy::responses_to_chat_completions(request).unwrap_or_default()
+        }
+        RelayProtocol::Completions => {
+            crate::protocol_proxy::responses_to_completions(request).unwrap_or_default()
+        }
+        RelayProtocol::AnthropicMessages => {
+            crate::protocol_proxy::responses_to_anthropic_messages(request).unwrap_or_default()
+        }
+        RelayProtocol::GeminiGenerateContent => {
+            crate::protocol_proxy::responses_to_gemini_generate_content(request).unwrap_or_default()
+        }
+    }
+}
+
+fn relay_profile_test_endpoint(protocol: RelayProtocol, base_url: &str, model: &str) -> String {
+    match protocol {
+        RelayProtocol::Responses => crate::protocol_proxy::responses_url(base_url),
+        RelayProtocol::ChatCompletions => crate::protocol_proxy::chat_completions_url(base_url),
+        RelayProtocol::Completions => crate::protocol_proxy::completions_url(base_url),
+        RelayProtocol::AnthropicMessages => crate::protocol_proxy::anthropic_messages_url(base_url),
+        RelayProtocol::GeminiGenerateContent => {
+            crate::protocol_proxy::gemini_generate_content_url(base_url, model, false)
+        }
+    }
+}
+
+fn relay_profile_test_auth(
+    request: reqwest::RequestBuilder,
+    protocol: RelayProtocol,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
+    match protocol {
+        RelayProtocol::AnthropicMessages => request
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => request.header("x-goog-api-key", api_key),
+        _ => request.bearer_auth(api_key),
     }
 }
 
 fn codex_base_url_for_protocol(base_url: &str, protocol: RelayProtocol, proxy_port: u16) -> String {
     match protocol {
         RelayProtocol::Responses => base_url.to_string(),
-        RelayProtocol::ChatCompletions => {
+        RelayProtocol::ChatCompletions
+        | RelayProtocol::Completions
+        | RelayProtocol::AnthropicMessages
+        | RelayProtocol::GeminiGenerateContent => {
             crate::protocol_proxy::local_responses_proxy_base_url(proxy_port)
         }
     }
@@ -1450,6 +1478,17 @@ fn apply_model_catalog_to_config(
             return Ok(config_text.to_string());
         }
     }
+    if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        let catalog_json = build_custom_models_catalog_json(profile)?;
+        let catalog_path = home.join(&catalog_relative);
+        if let Some(parent) = catalog_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&catalog_path, catalog_json)?;
+        let mut doc = parse_toml_document(config_text)?;
+        doc["model_catalog_json"] = toml_edit::value(catalog_relative);
+        return Ok(normalize_optional_toml(doc));
+    }
     let (model_list, model_windows): (String, std::collections::HashMap<String, String>) =
         if profile.model_windows.trim().is_empty() && profile.model_list.contains('[') {
             crate::model_suffix::migrate_model_list_with_suffixes(&profile.model_list)
@@ -1470,11 +1509,107 @@ fn apply_model_catalog_to_config(
     if let Some(parent) = catalog_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let catalog_json = crate::model_suffix::build_model_catalog_json(&entries, fallback);
+    let mut catalog_json = crate::model_suffix::build_model_catalog_json(&entries, fallback);
+    catalog_json = apply_auto_compact_limits_to_catalog_json(
+        &catalog_json,
+        profile,
+        &model_windows,
+        fallback,
+    )?;
     std::fs::write(&catalog_path, catalog_json)?;
     let mut doc = parse_toml_document(config_text)?;
     doc["model_catalog_json"] = toml_edit::value(catalog_relative);
     Ok(normalize_optional_toml(doc))
+}
+
+fn apply_auto_compact_limits_to_catalog_json(
+    catalog_json: &str,
+    profile: &RelayProfile,
+    model_windows: &std::collections::HashMap<String, String>,
+    fallback_window: Option<u64>,
+) -> anyhow::Result<String> {
+    if !profile.auto_compact_enabled {
+        return Ok(catalog_json.to_string());
+    }
+    let mut catalog: Value = serde_json::from_str(catalog_json)?;
+    let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) else {
+        return Ok(catalog_json.to_string());
+    };
+    for model in models {
+        let slug = model
+            .get("slug")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let window = model_windows
+            .get(&slug)
+            .and_then(|token| crate::settings::parse_context_window_tokens(token))
+            .or(fallback_window)
+            .or_else(|| model.get("context_window").and_then(Value::as_u64));
+        if let Some(window) = window {
+            let limit = crate::settings::auto_compact_limit_from_percent(
+                window,
+                profile.auto_compact_percent,
+            );
+            model["auto_compact_token_limit"] = json!(limit);
+        }
+    }
+    Ok(serde_json::to_string_pretty(&catalog).unwrap_or_else(|_| catalog_json.to_string()))
+}
+
+fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<String> {
+    if profile.custom_models.is_empty() {
+        anyhow::bail!("自定义供应商至少需要一个模型");
+    }
+    let mut entries = Vec::new();
+    let mut auto_limits = std::collections::HashMap::new();
+    for model in &profile.custom_models {
+        let slug = model.model.trim();
+        if slug.is_empty() {
+            continue;
+        }
+        let window = crate::settings::parse_context_window_tokens(&model.context_window);
+        entries.push(crate::model_suffix::ModelCatalogEntry {
+            slug: slug.to_string(),
+            display_name: slug.to_string(),
+            suffix_window: window,
+        });
+        if model.auto_compact_enabled {
+            if let Some(window) = window {
+                auto_limits.insert(
+                    slug.to_string(),
+                    crate::settings::auto_compact_limit_from_percent(
+                        window,
+                        model.auto_compact_percent,
+                    ),
+                );
+            }
+        }
+    }
+    if entries.is_empty() {
+        anyhow::bail!("自定义供应商至少需要一个模型");
+    }
+    let fallback = profile
+        .default_custom_model()
+        .and_then(|model| crate::settings::parse_context_window_tokens(&model.context_window));
+    let mut catalog_json = crate::model_suffix::build_model_catalog_json(&entries, fallback);
+    if !auto_limits.is_empty() {
+        let mut catalog: Value = serde_json::from_str(&catalog_json)?;
+        if let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) {
+            for model in models {
+                let slug = model
+                    .get("slug")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if let Some(limit) = auto_limits.get(&slug) {
+                    model["auto_compact_token_limit"] = json!(*limit);
+                }
+            }
+        }
+        catalog_json = serde_json::to_string_pretty(&catalog).unwrap_or(catalog_json);
+    }
+    Ok(catalog_json)
 }
 
 fn sanitize_catalog_filename(id: &str) -> String {
@@ -1496,6 +1631,7 @@ fn sync_context_limits_from_config(profile: &mut RelayProfile, config_text: &str
     if let Some(value) = root_positive_int_string(config_text, "model_auto_compact_token_limit") {
         profile.auto_compact_limit = value;
     }
+    profile.migrate_legacy_auto_compact_fields();
 }
 
 fn root_positive_int_string(config_text: &str, key: &str) -> Option<String> {
@@ -1888,7 +2024,12 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         );
     }
-    if profile.protocol == RelayProtocol::ChatCompletions {
+    if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        return crate::protocol_proxy::local_responses_proxy_base_url(
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        );
+    }
+    if profile.protocol != RelayProtocol::Responses {
         if !profile.upstream_base_url.trim().is_empty() {
             return profile.upstream_base_url.trim().to_string();
         }
@@ -1904,7 +2045,7 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
     let provider_base_url = provider_string_from_config(&profile.config_contents, "base_url")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_default();
-    if profile.protocol == RelayProtocol::ChatCompletions
+    if profile.protocol != RelayProtocol::Responses
         && provider_base_url
             == crate::protocol_proxy::local_responses_proxy_base_url(
                 crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
@@ -1921,6 +2062,9 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
 pub fn relay_profile_api_key(profile: &RelayProfile) -> String {
     if profile.relay_mode == crate::settings::RelayMode::Aggregate {
         return "codex-plus-aggregate".to_string();
+    }
+    if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        return "codex-plus-custom".to_string();
     }
     if profile.relay_mode == crate::settings::RelayMode::Official {
         return experimental_bearer_token_from_config(&profile.config_contents)
@@ -1955,6 +2099,11 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
             .find(|value| !value.is_empty())
         {
             model = crate::model_suffix::parse_model_suffix(first).0;
+        }
+    }
+    if model.trim().is_empty() && profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        if let Some(default_model) = profile.default_custom_model() {
+            model = default_model.model.trim().to_string();
         }
     }
     // 若用户把后缀语法（如 deepseek-v4-flash[1M]）写在 model 字段，
@@ -2002,6 +2151,13 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
         profile.protocol,
         crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
+    let provider_base_url = if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        crate::protocol_proxy::local_responses_proxy_base_url(
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        )
+    } else {
+        provider_base_url
+    };
     if !provider_base_url.trim().is_empty() {
         provider["base_url"] = toml_edit::value(provider_base_url.trim());
     }
@@ -2022,6 +2178,37 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
             crate::model_suffix::migrate_model_list_with_suffixes(&profile.model_list);
         profile.model_list = clean_list;
         profile.model_windows = serde_json::to_string(&windows).unwrap_or_default();
+    }
+    profile.migrate_legacy_auto_compact_fields();
+    if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+        normalize_custom_models_profile(profile)?;
+        profile.config_contents = complete_relay_profile_config(profile)?;
+        profile.auth_contents = serde_json::to_string_pretty(&json!({
+            "OPENAI_API_KEY": "codex-plus-custom"
+        }))?;
+        profile.base_url = crate::protocol_proxy::local_responses_proxy_base_url(
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        );
+        profile.upstream_base_url.clear();
+        profile.api_key = "codex-plus-custom".to_string();
+        if let Some(default_model) = profile.default_custom_model().cloned() {
+            profile.model = default_model.model;
+            if default_model.auto_compact_enabled {
+                if let Some(window) =
+                    crate::settings::parse_context_window_tokens(&default_model.context_window)
+                {
+                    profile.context_window = window.to_string();
+                    profile.auto_compact_enabled = true;
+                    profile.auto_compact_percent = default_model.auto_compact_percent;
+                    profile.auto_compact_limit = crate::settings::auto_compact_limit_from_percent(
+                        window,
+                        default_model.auto_compact_percent,
+                    )
+                    .to_string();
+                }
+            }
+        }
+        return Ok(());
     }
     if profile.relay_mode == crate::settings::RelayMode::Official && !profile.official_mix_api_key {
         let has_api_config = !profile.base_url.trim().is_empty()
@@ -2070,6 +2257,59 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
     profile.upstream_base_url = source_base_url.clone();
     profile.base_url = source_base_url;
     profile.api_key = relay_profile_api_key(profile);
+    if profile.auto_compact_enabled {
+        profile.auto_compact_limit = profile.effective_auto_compact_limit();
+    }
+    Ok(())
+}
+
+fn normalize_custom_models_profile(profile: &mut RelayProfile) -> anyhow::Result<()> {
+    if profile.custom_models.is_empty() {
+        anyhow::bail!("自定义供应商至少需要一个模型");
+    }
+    let mut seen_names = HashSet::new();
+    for model in &mut profile.custom_models {
+        model.id = model.id.trim().to_string();
+        model.model = model.model.trim().to_string();
+        model.base_url = model.base_url.trim().trim_end_matches('/').to_string();
+        model.api_key = model.api_key.trim().to_string();
+        model.context_window = model.context_window.trim().to_string();
+        model.auto_compact_percent =
+            crate::settings::clamp_auto_compact_percent(model.auto_compact_percent);
+        if model.id.is_empty() {
+            model.id = uuid::Uuid::new_v4().to_string();
+        }
+        if model.model.is_empty() {
+            anyhow::bail!("自定义模型名不能为空");
+        }
+        if !seen_names.insert(model.model.clone()) {
+            anyhow::bail!("自定义模型名必须唯一：{}", model.model);
+        }
+        if !(model.base_url.starts_with("http://") || model.base_url.starts_with("https://")) {
+            anyhow::bail!("模型 {} 的 Base URL 必须是 HTTP/HTTPS", model.model);
+        }
+        if model.api_key.is_empty() {
+            anyhow::bail!("模型 {} 的 Key 不能为空", model.model);
+        }
+        if !model.context_window.is_empty()
+            && crate::settings::parse_context_window_tokens(&model.context_window).is_none()
+        {
+            anyhow::bail!("模型 {} 的上下文窗口无效", model.model);
+        }
+        if model.auto_compact_enabled
+            && crate::settings::parse_context_window_tokens(&model.context_window).is_none()
+        {
+            anyhow::bail!("模型 {} 开启自动压缩时必须提供有效上下文窗口", model.model);
+        }
+    }
+    if profile.default_custom_model_id.trim().is_empty()
+        || !profile
+            .custom_models
+            .iter()
+            .any(|model| model.id == profile.default_custom_model_id)
+    {
+        profile.default_custom_model_id = profile.custom_models[0].id.clone();
+    }
     Ok(())
 }
 

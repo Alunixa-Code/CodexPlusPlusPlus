@@ -1255,6 +1255,34 @@ pub async fn load_ads() -> CommandResult<AdsPayload> {
 }
 
 #[tauri::command]
+pub fn get_manager_autostart() -> CommandResult<codex_plus_core::autostart::AutostartStatus> {
+    ok(
+        "已读取开机自启状态。",
+        codex_plus_core::autostart::get_manager_autostart_status(),
+    )
+}
+
+#[tauri::command]
+pub fn set_manager_autostart_enabled(
+    enabled: bool,
+) -> CommandResult<codex_plus_core::autostart::AutostartStatus> {
+    match codex_plus_core::autostart::set_manager_autostart_enabled(enabled) {
+        Ok(status) => ok(
+            if enabled {
+                "已启用开机时启动 Codex++ 管理器。"
+            } else {
+                "已关闭开机时启动 Codex++ 管理器。"
+            },
+            status,
+        ),
+        Err(error) => failed(
+            &format!("设置开机自启失败：{error}"),
+            codex_plus_core::autostart::get_manager_autostart_status(),
+        ),
+    }
+}
+
+#[tauri::command]
 pub async fn refresh_script_market() -> CommandResult<ScriptMarketPayload> {
     match script_market::fetch_market_manifest(script_market::DEFAULT_MARKET_INDEX_URL).await {
         Ok(manifest) => ok(
@@ -2403,6 +2431,13 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
             match profile.protocol {
                 codex_plus_core::settings::RelayProtocol::Responses => "Responses API",
                 codex_plus_core::settings::RelayProtocol::ChatCompletions => "Chat Completions",
+                codex_plus_core::settings::RelayProtocol::Completions => "Completions",
+                codex_plus_core::settings::RelayProtocol::AnthropicMessages => {
+                    "Anthropic Messages"
+                }
+                codex_plus_core::settings::RelayProtocol::GeminiGenerateContent => {
+                    "Gemini generateContent"
+                }
             }
         ),
     });

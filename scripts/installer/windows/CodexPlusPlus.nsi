@@ -78,4 +78,5 @@ Section "Uninstall"
 
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Codex++"
   DeleteRegKey HKCU "Software\Codex++"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CodexPlusPlusManager"
 SectionEnd

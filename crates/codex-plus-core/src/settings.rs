@@ -77,6 +77,14 @@ pub struct RelayProfile {
     pub context_window: String,
     #[serde(rename = "autoCompactLimit", default)]
     pub auto_compact_limit: String,
+    #[serde(rename = "autoCompactEnabled", default)]
+    pub auto_compact_enabled: bool,
+    #[serde(
+        rename = "autoCompactPercent",
+        default = "default_auto_compact_percent",
+        deserialize_with = "deserialize_auto_compact_percent"
+    )]
+    pub auto_compact_percent: u8,
     #[serde(rename = "modelInsertMode", default)]
     pub model_insert_mode: RelayModelInsertMode,
     #[serde(rename = "modelList", default)]
@@ -93,6 +101,18 @@ pub struct RelayProfile {
         skip_serializing_if = "String::is_empty"
     )]
     pub user_agent: String,
+    #[serde(
+        rename = "customModels",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub custom_models: Vec<CustomRelayModel>,
+    #[serde(
+        rename = "defaultCustomModelId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub default_custom_model_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
@@ -145,10 +165,14 @@ impl Default for RelayProfile {
             context_selection_initialized: false,
             context_window: String::new(),
             auto_compact_limit: String::new(),
+            auto_compact_enabled: false,
+            auto_compact_percent: default_auto_compact_percent(),
             model_insert_mode: RelayModelInsertMode::Patch,
             model_list: String::new(),
             model_windows: String::new(),
             user_agent: String::new(),
+            custom_models: Vec::new(),
+            default_custom_model_id: String::new(),
         }
     }
 }
@@ -167,6 +191,9 @@ pub enum RelayProtocol {
     #[default]
     Responses,
     ChatCompletions,
+    Completions,
+    AnthropicMessages,
+    GeminiGenerateContent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
@@ -177,6 +204,45 @@ pub enum RelayMode {
     MixedApi,
     PureApi,
     Aggregate,
+    CustomModels,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomRelayModel {
+    pub id: String,
+    pub model: String,
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: String,
+    #[serde(rename = "apiKey", default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub protocol: RelayProtocol,
+    #[serde(rename = "contextWindow", default)]
+    pub context_window: String,
+    #[serde(rename = "autoCompactEnabled", default)]
+    pub auto_compact_enabled: bool,
+    #[serde(
+        rename = "autoCompactPercent",
+        default = "default_auto_compact_percent",
+        deserialize_with = "deserialize_auto_compact_percent"
+    )]
+    pub auto_compact_percent: u8,
+}
+
+impl Default for CustomRelayModel {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            model: String::new(),
+            base_url: String::new(),
+            api_key: String::new(),
+            protocol: RelayProtocol::Responses,
+            context_window: String::new(),
+            auto_compact_enabled: false,
+            auto_compact_percent: default_auto_compact_percent(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -416,10 +482,14 @@ impl BackendSettings {
                 context_selection_initialized: false,
                 context_window: String::new(),
                 auto_compact_limit: String::new(),
+                auto_compact_enabled: false,
+                auto_compact_percent: default_auto_compact_percent(),
                 model_insert_mode: RelayModelInsertMode::Patch,
                 model_list: String::new(),
                 model_windows: String::new(),
                 user_agent: String::new(),
+                custom_models: Vec::new(),
+                default_custom_model_id: String::new(),
             };
         }
 
@@ -461,10 +531,14 @@ impl BackendSettings {
             context_selection_initialized: false,
             context_window: String::new(),
             auto_compact_limit: String::new(),
+            auto_compact_enabled: false,
+            auto_compact_percent: default_auto_compact_percent(),
             model_insert_mode: RelayModelInsertMode::Patch,
             model_list: String::new(),
             model_windows: String::new(),
             user_agent: String::new(),
+            custom_models: Vec::new(),
+            default_custom_model_id: String::new(),
         }
     }
 
@@ -495,7 +569,8 @@ impl BackendSettings {
 
     pub fn active_relay_uses_protocol_proxy(&self) -> bool {
         self.active_aggregate_relay_profile().is_some()
-            || self.active_relay_profile().protocol == RelayProtocol::ChatCompletions
+            || self.active_relay_profile().protocol != RelayProtocol::Responses
+            || self.active_relay_profile().relay_mode == RelayMode::CustomModels
     }
 }
 
@@ -578,6 +653,112 @@ pub fn default_aggregate_member_weight() -> u32 {
     1
 }
 
+pub fn default_auto_compact_percent() -> u8 {
+    80
+}
+
+pub fn clamp_auto_compact_percent(value: u8) -> u8 {
+    value.clamp(1, 100)
+}
+
+pub fn parse_context_window_tokens(value: &str) -> Option<u64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (num_part, multiplier) = match trimmed.chars().last() {
+        Some('K' | 'k') => (&trimmed[..trimmed.len() - 1], 1_000u64),
+        Some('M' | 'm') => (&trimmed[..trimmed.len() - 1], 1_000_000u64),
+        Some(_) => (trimmed, 1u64),
+        None => return None,
+    };
+    num_part
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|value| value * multiplier)
+        .filter(|value| *value > 0)
+}
+
+pub fn auto_compact_limit_from_percent(context_window: u64, percent: u8) -> u64 {
+    let percent = clamp_auto_compact_percent(percent) as u64;
+    let limit = context_window.saturating_mul(percent) / 100;
+    limit.clamp(1, context_window.max(1))
+}
+
+pub fn percent_from_auto_compact_limit(context_window: u64, limit: u64) -> Option<u8> {
+    if context_window == 0 || limit == 0 {
+        return None;
+    }
+    let percent = ((limit as f64) * 100.0 / (context_window as f64)).round() as i64;
+    if (1..=100).contains(&percent) {
+        Some(percent as u8)
+    } else {
+        None
+    }
+}
+
+impl RelayProfile {
+    pub fn default_custom_model(&self) -> Option<&CustomRelayModel> {
+        if self.relay_mode != RelayMode::CustomModels {
+            return None;
+        }
+        if !self.default_custom_model_id.trim().is_empty() {
+            if let Some(model) = self
+                .custom_models
+                .iter()
+                .find(|item| item.id == self.default_custom_model_id)
+            {
+                return Some(model);
+            }
+        }
+        self.custom_models.first()
+    }
+
+    pub fn find_custom_model_by_name(&self, model_name: &str) -> Option<&CustomRelayModel> {
+        let model_name = model_name.trim();
+        if model_name.is_empty() {
+            return self.default_custom_model();
+        }
+        self.custom_models
+            .iter()
+            .find(|item| item.model.trim() == model_name)
+    }
+
+    pub fn migrate_legacy_auto_compact_fields(&mut self) {
+        if self.auto_compact_enabled {
+            if let Some(window) = parse_context_window_tokens(&self.context_window) {
+                self.auto_compact_limit =
+                    auto_compact_limit_from_percent(window, self.auto_compact_percent).to_string();
+            }
+            return;
+        }
+        if self.auto_compact_limit.trim().is_empty() {
+            return;
+        }
+        let Some(window) = parse_context_window_tokens(&self.context_window) else {
+            return;
+        };
+        let Ok(limit) = self.auto_compact_limit.trim().parse::<u64>() else {
+            return;
+        };
+        if let Some(percent) = percent_from_auto_compact_limit(window, limit) {
+            self.auto_compact_enabled = true;
+            self.auto_compact_percent = percent;
+        }
+    }
+
+    pub fn effective_auto_compact_limit(&self) -> String {
+        if self.auto_compact_enabled {
+            if let Some(window) = parse_context_window_tokens(&self.context_window) {
+                return auto_compact_limit_from_percent(window, self.auto_compact_percent)
+                    .to_string();
+            }
+        }
+        self.auto_compact_limit.clone()
+    }
+}
+
 pub fn empty_as_default_stepwise_api_key_env<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -586,6 +767,15 @@ where
     Ok(value
         .filter(|value| !value.is_empty())
         .unwrap_or_else(default_stepwise_api_key_env))
+}
+
+fn deserialize_auto_compact_percent<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u8>::deserialize(deserializer)?
+        .map(clamp_auto_compact_percent)
+        .unwrap_or_else(default_auto_compact_percent))
 }
 
 fn deserialize_image_overlay_opacity<'de, D>(deserializer: D) -> Result<u8, D::Error>

@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -16,6 +17,7 @@ pub const DEFAULT_PROTOCOL_PROXY_PORT: u16 = 57321;
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPSTREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 const UPSTREAM_STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(120);
+const UPSTREAM_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const THINK_OPEN_TAG: &str = "<think>";
 const THINK_CLOSE_TAG: &str = "</think>";
 const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
@@ -34,6 +36,7 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "user",
 ];
 const ERROR_BODY_PREVIEW_LIMIT: usize = 1024;
+const GEMINI_SIGNATURE_CACHE_LIMIT: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChatReasoningStyle {
@@ -217,6 +220,305 @@ pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
     Ok(result)
 }
 
+pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
+    let chat = responses_to_chat_completions(body)?;
+    let mut prompt = String::new();
+    for message in chat
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        let content = chat_content_text(message.get("content").unwrap_or(&Value::Null));
+        if !content.is_empty() {
+            prompt.push_str(role);
+            prompt.push_str(": ");
+            prompt.push_str(&content);
+            prompt.push('\n');
+        }
+    }
+    prompt.push_str("assistant:");
+
+    let mut result = json!({
+        "model": chat.get("model").cloned().unwrap_or(Value::Null),
+        "prompt": prompt
+    });
+    for key in [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stream",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "seed",
+        "user",
+    ] {
+        if let Some(value) = chat.get(key) {
+            result[key] = value.clone();
+        }
+    }
+    Ok(result)
+}
+
+pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
+    let chat = responses_to_chat_completions(body)?;
+    let mut system = Vec::new();
+    let mut messages = Vec::new();
+    for message in chat
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        if role == "system" {
+            let text = chat_content_text(message.get("content").unwrap_or(&Value::Null));
+            if !text.is_empty() {
+                system.push(text);
+            }
+            continue;
+        }
+        if role == "tool" {
+            messages.push(json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+                    "content": chat_content_text(message.get("content").unwrap_or(&Value::Null))
+                }]
+            }));
+            continue;
+        }
+
+        let mut content = anthropic_content_parts(message.get("content").unwrap_or(&Value::Null));
+        if role == "assistant" {
+            if let Some(reasoning) = extract_reasoning_field_text(message) {
+                if !reasoning.is_empty() {
+                    content.insert(0, json!({ "type": "text", "text": reasoning }));
+                }
+            }
+            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for tool_call in tool_calls {
+                    let function = tool_call.get("function").unwrap_or(&Value::Null);
+                    content.push(json!({
+                        "type": "tool_use",
+                        "id": tool_call.get("id").and_then(Value::as_str).unwrap_or(""),
+                        "name": function.get("name").and_then(Value::as_str).unwrap_or(""),
+                        "input": parse_json_or_string(
+                            function.get("arguments").and_then(Value::as_str).unwrap_or("")
+                        )
+                    }));
+                }
+            }
+        }
+        if content.is_empty() {
+            content.push(json!({ "type": "text", "text": "" }));
+        }
+        messages.push(json!({
+            "role": if role == "assistant" { "assistant" } else { "user" },
+            "content": content
+        }));
+    }
+
+    let mut result = json!({
+        "model": chat.get("model").cloned().unwrap_or(Value::Null),
+        "max_tokens": chat
+            .get("max_tokens")
+            .or_else(|| chat.get("max_completion_tokens"))
+            .cloned()
+            .unwrap_or_else(|| json!(4096)),
+        "messages": messages,
+        "stream": chat.get("stream").cloned().unwrap_or_else(|| json!(false))
+    });
+    if !system.is_empty() {
+        result["system"] = json!(system.join("\n\n"));
+    }
+    if let Some(value) = chat.get("temperature") {
+        result["temperature"] = value.clone();
+    }
+    if let Some(value) = chat.get("top_p") {
+        result["top_p"] = value.clone();
+    }
+    if let Some(stop) = chat.get("stop") {
+        result["stop_sequences"] = if stop.is_array() {
+            stop.clone()
+        } else {
+            json!([stop])
+        };
+    }
+    if let Some(tools) = chat.get("tools").and_then(Value::as_array) {
+        let converted = tools
+            .iter()
+            .filter_map(|tool| {
+                let function = tool.get("function")?;
+                Some(json!({
+                    "name": function.get("name").cloned().unwrap_or(Value::Null),
+                    "description": function.get("description").cloned().unwrap_or(Value::Null),
+                    "input_schema": function.get("parameters").cloned().unwrap_or_else(|| json!({
+                        "type": "object",
+                        "properties": {}
+                    }))
+                }))
+            })
+            .collect::<Vec<_>>();
+        if !converted.is_empty() {
+            result["tools"] = json!(converted);
+        }
+    }
+    if let Some(tool_choice) = chat.get("tool_choice") {
+        result["tool_choice"] = match tool_choice {
+            Value::String(value) if value == "required" => json!({ "type": "any" }),
+            Value::String(value) if value == "none" => json!({ "type": "none" }),
+            Value::Object(_) => tool_choice
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .map(|name| json!({ "type": "tool", "name": name }))
+                .unwrap_or_else(|| json!({ "type": "auto" })),
+            _ => json!({ "type": "auto" }),
+        };
+    }
+    Ok(result)
+}
+
+pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value> {
+    let chat = responses_to_chat_completions(body)?;
+    let mut system_parts = Vec::new();
+    let mut contents = Vec::new();
+    let mut tool_names = BTreeMap::<String, String>::new();
+
+    for message in chat
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user");
+        if role == "system" {
+            let text = chat_content_text(message.get("content").unwrap_or(&Value::Null));
+            if !text.is_empty() {
+                system_parts.push(json!({ "text": text }));
+            }
+            continue;
+        }
+        if role == "tool" {
+            let call_id = message
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let name = tool_names
+                .get(call_id)
+                .cloned()
+                .unwrap_or_else(|| "tool".to_string());
+            contents.push(json!({
+                "role": "user",
+                "parts": [{
+                    "functionResponse": {
+                        "name": name,
+                        "response": { "result": chat_content_text(message.get("content").unwrap_or(&Value::Null)) }
+                    }
+                }]
+            }));
+            continue;
+        }
+
+        let mut parts = gemini_content_parts(message.get("content").unwrap_or(&Value::Null));
+        if role == "assistant" {
+            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for tool_call in tool_calls {
+                    let function = tool_call.get("function").unwrap_or(&Value::Null);
+                    let name = function
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool");
+                    let call_id = tool_call.get("id").and_then(Value::as_str).unwrap_or(name);
+                    tool_names.insert(call_id.to_string(), name.to_string());
+                    let mut part = json!({
+                        "functionCall": {
+                            "name": name,
+                            "args": parse_json_or_string(
+                                function.get("arguments").and_then(Value::as_str).unwrap_or("")
+                            )
+                        }
+                    });
+                    if let Some(signature) = gemini_thought_signature(call_id) {
+                        part["thoughtSignature"] = json!(signature);
+                    }
+                    parts.push(part);
+                }
+            }
+        }
+        if parts.is_empty() {
+            parts.push(json!({ "text": "" }));
+        }
+        contents.push(json!({
+            "role": if role == "assistant" { "model" } else { "user" },
+            "parts": parts
+        }));
+    }
+
+    let mut result = json!({ "contents": contents });
+    if !system_parts.is_empty() {
+        result["systemInstruction"] = json!({ "parts": system_parts });
+    }
+    let mut generation_config = json!({});
+    if let Some(value) = chat
+        .get("max_tokens")
+        .or_else(|| chat.get("max_completion_tokens"))
+    {
+        generation_config["maxOutputTokens"] = value.clone();
+    }
+    if let Some(value) = chat.get("temperature") {
+        generation_config["temperature"] = value.clone();
+    }
+    if let Some(value) = chat.get("top_p") {
+        generation_config["topP"] = value.clone();
+    }
+    if let Some(stop) = chat.get("stop") {
+        generation_config["stopSequences"] = if stop.is_array() {
+            stop.clone()
+        } else {
+            json!([stop])
+        };
+    }
+    if generation_config
+        .as_object()
+        .is_some_and(|object| !object.is_empty())
+    {
+        result["generationConfig"] = generation_config;
+    }
+    if let Some(tools) = chat.get("tools").and_then(Value::as_array) {
+        let declarations = tools
+            .iter()
+            .filter_map(|tool| {
+                let function = tool.get("function")?;
+                Some(json!({
+                    "name": function.get("name").cloned().unwrap_or(Value::Null),
+                    "description": function.get("description").cloned().unwrap_or(Value::Null),
+                    "parameters": function.get("parameters").cloned().unwrap_or_else(|| json!({
+                        "type": "object",
+                        "properties": {}
+                    }))
+                }))
+            })
+            .collect::<Vec<_>>();
+        if !declarations.is_empty() {
+            result["tools"] = json!([{ "functionDeclarations": declarations }]);
+        }
+    }
+    Ok(result)
+}
+
 pub fn chat_completion_to_response(body: Value) -> anyhow::Result<Value> {
     chat_completion_to_response_with_context(body, &CodexToolContext::default(), None)
 }
@@ -227,6 +529,33 @@ pub fn chat_completion_to_response_with_request(
 ) -> anyhow::Result<Value> {
     let context = build_codex_tool_context(original_request.get("tools"));
     chat_completion_to_response_with_context(body, &context, Some(original_request))
+}
+
+pub fn completion_to_response_with_request(
+    body: Value,
+    original_request: &Value,
+) -> anyhow::Result<Value> {
+    chat_completion_to_response_with_request(completion_to_chat_completion(body), original_request)
+}
+
+pub fn anthropic_message_to_response_with_request(
+    body: Value,
+    original_request: &Value,
+) -> anyhow::Result<Value> {
+    chat_completion_to_response_with_request(
+        anthropic_message_to_chat_completion(body),
+        original_request,
+    )
+}
+
+pub fn gemini_generate_content_to_response_with_request(
+    body: Value,
+    original_request: &Value,
+) -> anyhow::Result<Value> {
+    chat_completion_to_response_with_request(
+        gemini_generate_content_to_chat_completion(body, original_request),
+        original_request,
+    )
 }
 
 fn chat_completion_to_response_with_context(
@@ -276,6 +605,185 @@ fn chat_completion_to_response_with_context(
     Ok(response)
 }
 
+fn completion_to_chat_completion(body: Value) -> Value {
+    let choices = body
+        .get("choices")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|choice| {
+            json!({
+                "index": choice.get("index").cloned().unwrap_or_else(|| json!(0)),
+                "message": {
+                    "role": "assistant",
+                    "content": choice.get("text").cloned().unwrap_or_else(|| json!(""))
+                },
+                "finish_reason": choice.get("finish_reason").cloned().unwrap_or(Value::Null)
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "id": body.get("id").cloned().unwrap_or_else(|| json!("cmpl_compat")),
+        "created": body.get("created").cloned().unwrap_or_else(|| json!(0)),
+        "model": body.get("model").cloned().unwrap_or_else(|| json!("")),
+        "choices": choices,
+        "usage": body.get("usage").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn anthropic_message_to_chat_completion(body: Value) -> Value {
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut tool_calls = Vec::new();
+    for (index, block) in body
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        match block.get("type").and_then(Value::as_str).unwrap_or("") {
+            "text" => {
+                if let Some(value) = block.get("text").and_then(Value::as_str) {
+                    text.push_str(value);
+                }
+            }
+            "thinking" | "redacted_thinking" => {
+                if let Some(value) = block
+                    .get("thinking")
+                    .or_else(|| block.get("text"))
+                    .and_then(Value::as_str)
+                {
+                    reasoning.push_str(value);
+                }
+            }
+            "tool_use" => {
+                tool_calls.push(json!({
+                    "id": block
+                        .get("id")
+                        .cloned()
+                        .unwrap_or_else(|| json!(format!("call_{index}"))),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name").cloned().unwrap_or_else(|| json!("tool")),
+                        "arguments": serde_json::to_string(
+                            block.get("input").unwrap_or(&json!({}))
+                        ).unwrap_or_else(|_| "{}".to_string())
+                    }
+                }));
+            }
+            _ => {}
+        }
+    }
+    let mut message = json!({
+        "role": "assistant",
+        "content": text
+    });
+    if !reasoning.is_empty() {
+        message["reasoning_content"] = json!(reasoning);
+    }
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = json!(tool_calls);
+    }
+    let finish_reason = match body.get("stop_reason").and_then(Value::as_str) {
+        Some("max_tokens") => "length",
+        Some("tool_use") => "tool_calls",
+        _ => "stop",
+    };
+    json!({
+        "id": body.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
+        "created": 0,
+        "model": body.get("model").cloned().unwrap_or_else(|| json!("")),
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason
+        }],
+        "usage": anthropic_usage_to_chat_usage(body.get("usage"))
+    })
+}
+
+fn gemini_generate_content_to_chat_completion(body: Value, original_request: &Value) -> Value {
+    let candidate = body
+        .get("candidates")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut tool_calls = Vec::new();
+    for (index, part) in candidate
+        .pointer("/content/parts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        if let Some(value) = part.get("text").and_then(Value::as_str) {
+            if part
+                .get("thought")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                reasoning.push_str(value);
+            } else {
+                text.push_str(value);
+            }
+        }
+        if let Some(call) = part.get("functionCall") {
+            let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
+            let call_id = format!("call_gemini_{index}");
+            if let Some(signature) = part.get("thoughtSignature").and_then(Value::as_str) {
+                remember_gemini_thought_signature(&call_id, signature);
+            }
+            tool_calls.push(json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": serde_json::to_string(
+                        call.get("args").unwrap_or(&json!({}))
+                    ).unwrap_or_else(|_| "{}".to_string())
+                }
+            }));
+        }
+    }
+    let mut message = json!({
+        "role": "assistant",
+        "content": text
+    });
+    if !reasoning.is_empty() {
+        message["reasoning_content"] = json!(reasoning);
+    }
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = json!(tool_calls);
+    }
+    let finish_reason = match candidate.get("finishReason").and_then(Value::as_str) {
+        Some("MAX_TOKENS") => "length",
+        Some("STOP") | None if !tool_calls.is_empty() => "tool_calls",
+        _ => "stop",
+    };
+    json!({
+        "id": body
+            .get("responseId")
+            .cloned()
+            .unwrap_or_else(|| json!("gemini_compat")),
+        "created": 0,
+        "model": original_request
+            .get("model")
+            .cloned()
+            .unwrap_or_else(|| json!("")),
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason
+        }],
+        "usage": gemini_usage_to_chat_usage(body.get("usageMetadata"))
+    })
+}
+
 pub struct ProxyHttpResponse {
     pub status: String,
     pub content_type: String,
@@ -294,6 +802,9 @@ pub struct UpstreamProxyResponse {
 pub enum UpstreamWireApi {
     Responses,
     ChatCompletions,
+    Completions,
+    AnthropicMessages,
+    GeminiGenerateContent,
 }
 
 impl UpstreamProxyResponse {
@@ -312,6 +823,10 @@ pub fn upstream_header_timeout() -> Duration {
 
 pub fn upstream_stream_header_timeout() -> Duration {
     UPSTREAM_STREAM_HEADER_TIMEOUT
+}
+
+pub fn upstream_stream_idle_timeout() -> Duration {
+    UPSTREAM_STREAM_IDLE_TIMEOUT
 }
 
 pub fn upstream_http_client() -> anyhow::Result<reqwest::Client> {
@@ -408,6 +923,10 @@ impl ChatSseToResponsesConverter {
         output.into_bytes()
     }
 
+    pub fn is_completed(&self) -> bool {
+        self.failed || self.state.completed
+    }
+
     fn handle_block(&mut self, block: &str, output: &mut String) {
         let mut event_name: Option<String> = None;
         let mut data_parts = Vec::new();
@@ -439,6 +958,423 @@ impl ChatSseToResponsesConverter {
             return;
         }
         self.state.handle_chat_chunk_into(&chunk, output);
+    }
+}
+
+pub struct NativeSseToResponsesConverter {
+    wire_api: UpstreamWireApi,
+    buffer: String,
+    utf8_remainder: Vec<u8>,
+    state: ChatSseState,
+    failed: bool,
+    next_tool_index: usize,
+}
+
+impl NativeSseToResponsesConverter {
+    pub fn with_request(wire_api: UpstreamWireApi, original_request: &Value) -> Self {
+        Self {
+            wire_api,
+            buffer: String::new(),
+            utf8_remainder: Vec::new(),
+            state: ChatSseState::with_request(original_request),
+            failed: false,
+            next_tool_index: 0,
+        }
+    }
+
+    pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        append_utf8_safe(&mut self.buffer, &mut self.utf8_remainder, bytes);
+        let mut output = String::new();
+        while let Some(block) = take_sse_block(&mut self.buffer) {
+            if block.trim().is_empty() {
+                continue;
+            }
+            self.handle_block(&block, &mut output);
+            if self.is_completed() {
+                break;
+            }
+        }
+        output.into_bytes()
+    }
+
+    pub fn finish(&mut self) -> Vec<u8> {
+        if !self.utf8_remainder.is_empty() {
+            self.buffer
+                .push_str(&String::from_utf8_lossy(&self.utf8_remainder));
+            self.utf8_remainder.clear();
+        }
+        let mut output = String::new();
+        if !self.failed && !self.state.completed {
+            if !self.buffer.trim().is_empty() {
+                let block = std::mem::take(&mut self.buffer);
+                self.handle_block(&block, &mut output);
+            }
+            if !self.state.completed {
+                self.state.finalize_into(&mut output);
+            }
+        }
+        output.into_bytes()
+    }
+
+    pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
+        let mut output = String::new();
+        self.state.failed_into(&mut output, message, error_type);
+        self.failed = true;
+        output.into_bytes()
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.failed || self.state.completed
+    }
+
+    fn handle_block(&mut self, block: &str, output: &mut String) {
+        let (event_name, data) = sse_event_and_data(block);
+        let Some(data) = data else {
+            return;
+        };
+        if data.trim() == "[DONE]" {
+            self.state.finalize_into(output);
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            return;
+        };
+        if event_name.as_deref() == Some("error") || value.get("error").is_some() {
+            let (message, error_type) = extract_chat_sse_error(&value);
+            self.state.failed_into(output, message, error_type);
+            self.failed = true;
+            return;
+        }
+        match self.wire_api {
+            UpstreamWireApi::Completions => self.handle_completion_chunk(&value, output),
+            UpstreamWireApi::AnthropicMessages => {
+                self.handle_anthropic_event(event_name.as_deref(), &value, output)
+            }
+            UpstreamWireApi::GeminiGenerateContent => self.handle_gemini_chunk(&value, output),
+            _ => {}
+        }
+    }
+
+    fn handle_completion_chunk(&mut self, value: &Value, output: &mut String) {
+        let choices = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|choice| {
+                json!({
+                    "index": choice.get("index").cloned().unwrap_or_else(|| json!(0)),
+                    "delta": {
+                        "content": choice.get("text").cloned().unwrap_or_else(|| json!(""))
+                    },
+                    "finish_reason": choice.get("finish_reason").cloned().unwrap_or(Value::Null)
+                })
+            })
+            .collect::<Vec<_>>();
+        let chunk = json!({
+            "id": value.get("id").cloned().unwrap_or_else(|| json!("cmpl_compat")),
+            "created": value.get("created").cloned().unwrap_or_else(|| json!(0)),
+            "model": value.get("model").cloned().unwrap_or_else(|| json!("")),
+            "choices": choices,
+            "usage": value.get("usage").cloned().unwrap_or(Value::Null)
+        });
+        self.state.handle_chat_chunk_into(&chunk, output);
+        if value
+            .pointer("/choices/0/finish_reason")
+            .is_some_and(|reason| !reason.is_null())
+        {
+            self.state.finalize_into(output);
+        }
+    }
+
+    fn handle_anthropic_event(
+        &mut self,
+        event_name: Option<&str>,
+        value: &Value,
+        output: &mut String,
+    ) {
+        let event_type = event_name
+            .or_else(|| value.get("type").and_then(Value::as_str))
+            .unwrap_or("");
+        match event_type {
+            "message_start" => {
+                let message = value.get("message").unwrap_or(value);
+                self.state.handle_chat_chunk_into(
+                    &json!({
+                        "id": message.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
+                        "model": message.get("model").cloned().unwrap_or_else(|| json!("")),
+                        "choices": [],
+                        "usage": anthropic_usage_to_chat_usage(message.get("usage"))
+                    }),
+                    output,
+                );
+            }
+            "content_block_start" => {
+                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let block = value.get("content_block").unwrap_or(&Value::Null);
+                match block.get("type").and_then(Value::as_str).unwrap_or("") {
+                    "text" => {
+                        if let Some(text) = block.get("text").and_then(Value::as_str) {
+                            self.push_chat_text_delta(text, output);
+                        }
+                    }
+                    "thinking" => {
+                        if let Some(text) = block.get("thinking").and_then(Value::as_str) {
+                            self.push_chat_reasoning_delta(text, output);
+                        }
+                    }
+                    "tool_use" => {
+                        let arguments = block
+                            .get("input")
+                            .filter(|input| {
+                                !input.is_null()
+                                    && input.as_object().is_none_or(|object| !object.is_empty())
+                            })
+                            .map(|input| serde_json::to_string(input).unwrap_or_default())
+                            .unwrap_or_default();
+                        self.push_chat_tool_delta(
+                            index,
+                            block.get("id").and_then(Value::as_str),
+                            block.get("name").and_then(Value::as_str),
+                            &arguments,
+                            output,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            "content_block_delta" => {
+                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let delta = value.get("delta").unwrap_or(&Value::Null);
+                match delta.get("type").and_then(Value::as_str).unwrap_or("") {
+                    "text_delta" => self.push_chat_text_delta(
+                        delta.get("text").and_then(Value::as_str).unwrap_or(""),
+                        output,
+                    ),
+                    "thinking_delta" => self.push_chat_reasoning_delta(
+                        delta.get("thinking").and_then(Value::as_str).unwrap_or(""),
+                        output,
+                    ),
+                    "input_json_delta" => self.push_chat_tool_delta(
+                        index,
+                        None,
+                        None,
+                        delta
+                            .get("partial_json")
+                            .and_then(Value::as_str)
+                            .unwrap_or(""),
+                        output,
+                    ),
+                    _ => {}
+                }
+            }
+            "message_delta" => {
+                let stop_reason = value
+                    .pointer("/delta/stop_reason")
+                    .and_then(Value::as_str)
+                    .map(anthropic_finish_reason);
+                let mut chunk = json!({
+                    "choices": [{
+                        "delta": {},
+                        "finish_reason": stop_reason
+                    }]
+                });
+                if let Some(usage) = value.get("usage") {
+                    chunk["usage"] = anthropic_usage_to_chat_usage(Some(usage));
+                }
+                self.state.handle_chat_chunk_into(&chunk, output);
+            }
+            "message_stop" => self.state.finalize_into(output),
+            "error" => {
+                let (message, error_type) = extract_chat_sse_error(value);
+                self.state.failed_into(output, message, error_type);
+                self.failed = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_gemini_chunk(&mut self, value: &Value, output: &mut String) {
+        if let Some(error) = value.get("error") {
+            let (message, error_type) = extract_chat_sse_error(error);
+            self.state.failed_into(output, message, error_type);
+            self.failed = true;
+            return;
+        }
+        let candidate = value
+            .get("candidates")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first());
+        let mut delta = json!({});
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        let mut tool_calls = Vec::new();
+        if let Some(parts) = candidate
+            .and_then(|candidate| candidate.pointer("/content/parts"))
+            .and_then(Value::as_array)
+        {
+            for part in parts {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    if part
+                        .get("thought")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        reasoning.push_str(text);
+                    } else {
+                        content.push_str(text);
+                    }
+                }
+                if let Some(call) = part.get("functionCall") {
+                    let index = self.next_tool_index;
+                    self.next_tool_index += 1;
+                    let call_id = format!("call_gemini_{index}");
+                    if let Some(signature) = part.get("thoughtSignature").and_then(Value::as_str) {
+                        remember_gemini_thought_signature(&call_id, signature);
+                    }
+                    tool_calls.push(json!({
+                        "index": index,
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name").cloned().unwrap_or_else(|| json!("tool")),
+                            "arguments": serde_json::to_string(
+                                call.get("args").unwrap_or(&json!({}))
+                            ).unwrap_or_else(|_| "{}".to_string())
+                        }
+                    }));
+                }
+            }
+        }
+        if !content.is_empty() {
+            delta["content"] = json!(content);
+        }
+        if !reasoning.is_empty() {
+            delta["reasoning_content"] = json!(reasoning);
+        }
+        if !tool_calls.is_empty() {
+            delta["tool_calls"] = json!(tool_calls);
+        }
+        let finish_reason = candidate
+            .and_then(|candidate| candidate.get("finishReason"))
+            .and_then(Value::as_str)
+            .map(|reason| gemini_finish_reason(reason, !delta["tool_calls"].is_null()));
+        let mut chunk = json!({
+            "id": value.get("responseId").cloned().unwrap_or_else(|| json!("gemini_compat")),
+            "model": self
+                .state
+                .original_request
+                .as_ref()
+                .and_then(|request| request.get("model"))
+                .cloned()
+                .unwrap_or_else(|| json!("")),
+            "choices": [{
+                "delta": delta,
+                "finish_reason": finish_reason
+            }]
+        });
+        if let Some(usage) = value.get("usageMetadata") {
+            chunk["usage"] = gemini_usage_to_chat_usage(Some(usage));
+        }
+        self.state.handle_chat_chunk_into(&chunk, output);
+        if finish_reason.is_some() {
+            self.state.finalize_into(output);
+        }
+    }
+
+    fn push_chat_text_delta(&mut self, text: &str, output: &mut String) {
+        if text.is_empty() {
+            return;
+        }
+        self.state.handle_chat_chunk_into(
+            &json!({ "choices": [{ "delta": { "content": text } }] }),
+            output,
+        );
+    }
+
+    fn push_chat_reasoning_delta(&mut self, text: &str, output: &mut String) {
+        if text.is_empty() {
+            return;
+        }
+        self.state.handle_chat_chunk_into(
+            &json!({ "choices": [{ "delta": { "reasoning_content": text } }] }),
+            output,
+        );
+    }
+
+    fn push_chat_tool_delta(
+        &mut self,
+        index: usize,
+        id: Option<&str>,
+        name: Option<&str>,
+        arguments: &str,
+        output: &mut String,
+    ) {
+        let mut tool_call = json!({
+            "index": index,
+            "type": "function",
+            "function": { "arguments": arguments }
+        });
+        if let Some(id) = id {
+            tool_call["id"] = json!(id);
+        }
+        if let Some(name) = name {
+            tool_call["function"]["name"] = json!(name);
+        }
+        self.state.handle_chat_chunk_into(
+            &json!({ "choices": [{ "delta": { "tool_calls": [tool_call] } }] }),
+            output,
+        );
+    }
+}
+
+pub enum UpstreamSseToResponsesConverter {
+    Chat(ChatSseToResponsesConverter),
+    Native(NativeSseToResponsesConverter),
+}
+
+impl UpstreamSseToResponsesConverter {
+    pub fn with_request(wire_api: UpstreamWireApi, original_request: &Value) -> Option<Self> {
+        match wire_api {
+            UpstreamWireApi::Responses => None,
+            UpstreamWireApi::ChatCompletions => Some(Self::Chat(
+                ChatSseToResponsesConverter::with_request(original_request),
+            )),
+            UpstreamWireApi::Completions
+            | UpstreamWireApi::AnthropicMessages
+            | UpstreamWireApi::GeminiGenerateContent => Some(Self::Native(
+                NativeSseToResponsesConverter::with_request(wire_api, original_request),
+            )),
+        }
+    }
+
+    pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Chat(converter) => converter.push_bytes(bytes),
+            Self::Native(converter) => converter.push_bytes(bytes),
+        }
+    }
+
+    pub fn finish(&mut self) -> Vec<u8> {
+        match self {
+            Self::Chat(converter) => converter.finish(),
+            Self::Native(converter) => converter.finish(),
+        }
+    }
+
+    pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
+        match self {
+            Self::Chat(converter) => converter.fail(message, error_type),
+            Self::Native(converter) => converter.fail(message, error_type),
+        }
+    }
+
+    pub fn is_completed(&self) -> bool {
+        match self {
+            Self::Chat(converter) => converter.is_completed(),
+            Self::Native(converter) => converter.is_completed(),
+        }
     }
 }
 
@@ -506,6 +1442,15 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         conversation_id: conversation_id_from_responses_request(&request_json),
     };
     let relay = crate::relay_rotation::select_relay_for_request(&settings, context)?;
+    if relay.relay_mode == crate::settings::RelayMode::CustomModels {
+        return open_custom_models_proxy_request(
+            &relay,
+            &request_json,
+            is_stream,
+            original_user_agent,
+        )
+        .await;
+    }
     let mut relays = vec![relay.clone()];
     relays.extend(crate::relay_rotation::fallback_relays_after(
         &settings, &relay.id,
@@ -540,6 +1485,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 relay.api_key.trim(),
                 is_stream,
                 &upstream_body,
+                wire_api,
             ),
             is_stream,
         )
@@ -648,15 +1594,21 @@ pub async fn open_models_proxy_request(
             "wireApi": UpstreamWireApi::Responses
         }),
     );
-    let upstream = send_upstream_request(
-        crate::http_client::proxied_client(&effective_user_agent(
-            &relay.user_agent,
-            original_user_agent,
-        ))?
-        .get(endpoint)
-        .bearer_auth(relay.api_key.trim()),
-    )
-    .await?;
+    let request = crate::http_client::proxied_client(&effective_user_agent(
+        &relay.user_agent,
+        original_user_agent,
+    ))?
+    .get(endpoint);
+    let request = match relay.protocol {
+        RelayProtocol::AnthropicMessages => request
+            .header("x-api-key", relay.api_key.trim())
+            .header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => {
+            request.header("x-goog-api-key", relay.api_key.trim())
+        }
+        _ => request.bearer_auth(relay.api_key.trim()),
+    };
+    let upstream = send_upstream_request(request).await?;
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
@@ -669,7 +1621,13 @@ pub async fn open_models_proxy_request(
         status_code,
         is_stream: false,
         content_type,
-        wire_api: UpstreamWireApi::Responses,
+        wire_api: match relay.protocol {
+            RelayProtocol::Responses => UpstreamWireApi::Responses,
+            RelayProtocol::ChatCompletions => UpstreamWireApi::ChatCompletions,
+            RelayProtocol::Completions => UpstreamWireApi::Completions,
+            RelayProtocol::AnthropicMessages => UpstreamWireApi::AnthropicMessages,
+            RelayProtocol::GeminiGenerateContent => UpstreamWireApi::GeminiGenerateContent,
+        },
         response: upstream,
     })
 }
@@ -745,6 +1703,31 @@ fn upstream_request_parts(
             responses_to_chat_completions(request_json)?,
             UpstreamWireApi::ChatCompletions,
         )),
+        RelayProtocol::Completions => Ok((
+            completions_url(&relay.base_url),
+            responses_to_completions(request_json)?,
+            UpstreamWireApi::Completions,
+        )),
+        RelayProtocol::AnthropicMessages => Ok((
+            anthropic_messages_url(&relay.base_url),
+            responses_to_anthropic_messages(request_json)?,
+            UpstreamWireApi::AnthropicMessages,
+        )),
+        RelayProtocol::GeminiGenerateContent => {
+            let model = request_json
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or(&relay.model);
+            let is_stream = request_json
+                .get("stream")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok((
+                gemini_generate_content_url(&relay.base_url, model, is_stream),
+                responses_to_gemini_generate_content(request_json)?,
+                UpstreamWireApi::GeminiGenerateContent,
+            ))
+        }
     }
 }
 
@@ -754,11 +1737,18 @@ fn upstream_request_builder(
     api_key: &str,
     is_stream: bool,
     upstream_body: &Value,
+    wire_api: UpstreamWireApi,
 ) -> reqwest::RequestBuilder {
     let mut builder = client
         .post(endpoint)
-        .bearer_auth(api_key)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
+    builder = match wire_api {
+        UpstreamWireApi::AnthropicMessages => builder
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01"),
+        UpstreamWireApi::GeminiGenerateContent => builder.header("x-goog-api-key", api_key),
+        _ => builder.bearer_auth(api_key),
+    };
     if is_stream {
         builder = builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -775,6 +1765,151 @@ fn validate_upstream(relay: &crate::settings::RelayProfile) -> anyhow::Result<()
         anyhow::bail!("上游 Key 不能为空");
     }
     Ok(())
+}
+
+pub fn custom_models_list_payload(relay: &crate::settings::RelayProfile) -> Value {
+    let data = relay
+        .custom_models
+        .iter()
+        .map(|model| {
+            json!({
+                "id": model.model,
+                "object": "model",
+                "owned_by": "codex-plus-custom"
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({ "object": "list", "data": data })
+}
+
+pub fn normalize_models_payload(payload: &Value) -> Value {
+    fn collect(value: &Value, output: &mut Vec<String>) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    collect(item, output);
+                }
+            }
+            Value::Object(object) => {
+                for key in ["id", "model", "name"] {
+                    if let Some(model) = object.get(key).and_then(Value::as_str) {
+                        let model = model.strip_prefix("models/").unwrap_or(model).trim();
+                        if !model.is_empty() && !output.iter().any(|existing| existing == model) {
+                            output.push(model.to_string());
+                        }
+                        return;
+                    }
+                }
+                for key in ["data", "models", "items"] {
+                    if let Some(nested) = object.get(key) {
+                        collect(nested, output);
+                    }
+                }
+            }
+            Value::String(model) => {
+                let model = model.strip_prefix("models/").unwrap_or(model).trim();
+                if !model.is_empty() && !output.iter().any(|existing| existing == model) {
+                    output.push(model.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut models = Vec::new();
+    collect(payload, &mut models);
+    json!({
+        "object": "list",
+        "data": models.into_iter().map(|model| json!({
+            "id": model,
+            "object": "model",
+            "owned_by": "upstream"
+        })).collect::<Vec<_>>()
+    })
+}
+
+async fn open_custom_models_proxy_request(
+    relay: &crate::settings::RelayProfile,
+    request_json: &Value,
+    is_stream: bool,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    let requested_model = request_json
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let model = match relay.find_custom_model_by_name(&requested_model) {
+        Some(model) => model,
+        None if !requested_model.is_empty() => {
+            anyhow::bail!("未知自定义模型：{requested_model}");
+        }
+        None => {
+            anyhow::bail!("自定义供应商未配置默认模型");
+        }
+    };
+    if model.base_url.trim().is_empty() {
+        anyhow::bail!("模型 {} 的 Base URL 不能为空", model.model);
+    }
+    if model.api_key.trim().is_empty() {
+        anyhow::bail!("模型 {} 的 Key 不能为空", model.model);
+    }
+    let mut synthetic = relay.clone();
+    synthetic.base_url = model.base_url.clone();
+    synthetic.upstream_base_url = model.base_url.clone();
+    synthetic.api_key = model.api_key.clone();
+    synthetic.protocol = model.protocol;
+    synthetic.model = model.model.clone();
+    let (endpoint, upstream_body, wire_api) =
+        upstream_request_parts(&synthetic, request_json.clone())?;
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.custom_model_request",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "model": model.model,
+            "protocol": match model.protocol {
+                RelayProtocol::Responses => "responses",
+                RelayProtocol::ChatCompletions => "chatCompletions",
+                RelayProtocol::Completions => "completions",
+                RelayProtocol::AnthropicMessages => "anthropicMessages",
+                RelayProtocol::GeminiGenerateContent => "geminiGenerateContent",
+            },
+            "endpoint": endpoint,
+            "stream": is_stream
+        }),
+    );
+    let upstream = send_upstream_request_for_responses(
+        upstream_request_builder(
+            crate::http_client::proxied_client(&effective_user_agent(
+                &relay.user_agent,
+                original_user_agent,
+            ))?,
+            &endpoint,
+            model.api_key.trim(),
+            is_stream,
+            &upstream_body,
+            wire_api,
+        ),
+        is_stream,
+    )
+    .await
+    .with_context(|| format!("自定义模型「{}」请求上游失败", model.model))?;
+    let status_code = upstream.status().as_u16();
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    Ok(UpstreamProxyResponse {
+        status_code,
+        is_stream: is_stream || content_type.contains("text/event-stream"),
+        content_type,
+        wire_api,
+        response: upstream,
+    })
 }
 
 fn conversation_id_from_responses_request(body: &Value) -> Option<String> {
@@ -833,16 +1968,45 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
     }
 
     if is_stream {
-        let text = String::from_utf8_lossy(&upstream_body);
+        let body = match wire_api {
+            UpstreamWireApi::ChatCompletions => {
+                let text = String::from_utf8_lossy(&upstream_body);
+                chat_sse_to_responses_sse_with_request(&text, &request_json).into_bytes()
+            }
+            UpstreamWireApi::Completions
+            | UpstreamWireApi::AnthropicMessages
+            | UpstreamWireApi::GeminiGenerateContent => {
+                let mut converter =
+                    NativeSseToResponsesConverter::with_request(wire_api, &request_json);
+                let mut converted = converter.push_bytes(&upstream_body);
+                converted.extend(converter.finish());
+                converted
+            }
+            UpstreamWireApi::Responses => upstream_body.to_vec(),
+        };
         return Ok(ProxyHttpResponse {
             status: "200 OK".to_string(),
             content_type: "text/event-stream; charset=utf-8".to_string(),
-            body: chat_sse_to_responses_sse_with_request(&text, &request_json).into_bytes(),
+            body,
         });
     }
 
-    let chat_json: Value = serde_json::from_slice(&upstream_body)?;
-    let response_json = chat_completion_to_response_with_request(chat_json, &request_json)?;
+    let upstream_json: Value = serde_json::from_slice(&upstream_body)?;
+    let response_json = match wire_api {
+        UpstreamWireApi::ChatCompletions => {
+            chat_completion_to_response_with_request(upstream_json, &request_json)?
+        }
+        UpstreamWireApi::Completions => {
+            completion_to_response_with_request(upstream_json, &request_json)?
+        }
+        UpstreamWireApi::AnthropicMessages => {
+            anthropic_message_to_response_with_request(upstream_json, &request_json)?
+        }
+        UpstreamWireApi::GeminiGenerateContent => {
+            gemini_generate_content_to_response_with_request(upstream_json, &request_json)?
+        }
+        UpstreamWireApi::Responses => upstream_json,
+    };
     Ok(ProxyHttpResponse {
         status: "200 OK".to_string(),
         content_type: "application/json; charset=utf-8".to_string(),
@@ -863,6 +2027,87 @@ pub fn chat_completions_url(base_url: &str) -> String {
         format!("{base}/chat/completions")
     } else {
         format!("{base}/v1/chat/completions")
+    };
+    while url.contains("/v1/v1") {
+        url = url.replace("/v1/v1", "/v1");
+    }
+    url
+}
+
+pub fn completions_url(base_url: &str) -> String {
+    endpoint_url(base_url, "/completions", "/v1/completions")
+}
+
+pub fn anthropic_messages_url(base_url: &str) -> String {
+    endpoint_url(base_url, "/messages", "/v1/messages")
+}
+
+pub fn gemini_generate_content_url(base_url: &str, model: &str, stream: bool) -> String {
+    let method = if stream {
+        "streamGenerateContent"
+    } else {
+        "generateContent"
+    };
+    let model = model.trim().strip_prefix("models/").unwrap_or(model.trim());
+    let mut base = base_url.trim().trim_end_matches('/').to_string();
+    if base.contains("{model_id}") {
+        base = base.replace("{model_id}", model);
+    }
+    if let Some(index) = base.rfind(":generateContent") {
+        base.truncate(index);
+        base.push(':');
+        base.push_str(method);
+    } else if let Some(index) = base.rfind(":streamGenerateContent") {
+        base.truncate(index);
+        base.push(':');
+        base.push_str(method);
+    } else if base.contains("/models/") {
+        base.push(':');
+        base.push_str(method);
+    } else if base.ends_with("/models") {
+        base.push('/');
+        base.push_str(model);
+        base.push(':');
+        base.push_str(method);
+    } else {
+        let origin_only = base
+            .split_once("://")
+            .map_or(!base.contains('/'), |(_, rest)| !rest.contains('/'));
+        if origin_only {
+            base.push_str("/v1");
+        }
+        base.push_str("/models/");
+        base.push_str(model);
+        base.push(':');
+        base.push_str(method);
+    }
+    if stream && !base.contains('?') {
+        base.push_str("?alt=sse");
+    } else if stream && !base.contains("alt=sse") {
+        base.push_str("&alt=sse");
+    }
+    while base.contains("/v1/v1") {
+        base = base.replace("/v1/v1", "/v1");
+    }
+    base
+}
+
+fn endpoint_url(base_url: &str, endpoint_suffix: &str, origin_suffix: &str) -> String {
+    let skip_version_prefix = base_url.trim().ends_with('#');
+    let base = base_url.trim().trim_end_matches('#').trim_end_matches('/');
+    if base
+        .to_ascii_lowercase()
+        .ends_with(&endpoint_suffix.to_ascii_lowercase())
+    {
+        return base.to_string();
+    }
+    let origin_only = base
+        .split_once("://")
+        .map_or(!base.contains('/'), |(_, rest)| !rest.contains('/'));
+    let mut url = if skip_version_prefix || has_version_suffix(base) || !origin_only {
+        format!("{base}{endpoint_suffix}")
+    } else {
+        format!("{base}{origin_suffix}")
     };
     while url.contains("/v1/v1") {
         url = url.replace("/v1/v1", "/v1");
@@ -897,8 +2142,23 @@ pub fn models_url(base_url: &str) -> String {
         .trim_end_matches('#')
         .trim_end_matches('/')
         .to_string();
-    if base.to_ascii_lowercase().ends_with("/chat/completions") {
-        base.truncate(base.len() - "/chat/completions".len());
+    for suffix in [
+        "/chat/completions",
+        "/completions",
+        "/messages",
+        "/responses",
+    ] {
+        if base.to_ascii_lowercase().ends_with(suffix) {
+            base.truncate(base.len() - suffix.len());
+            break;
+        }
+    }
+    if let Some(models_index) = base.find("/models/") {
+        if base[models_index..].contains(":generateContent")
+            || base[models_index..].contains(":streamGenerateContent")
+        {
+            base.truncate(models_index + "/models".len());
+        }
     }
     if base.to_ascii_lowercase().ends_with("/models") {
         return base;
@@ -1097,6 +2357,7 @@ impl ChatSseState {
 
         if let Some(finish_reason) = choice.get("finish_reason").and_then(Value::as_str) {
             self.finish_reason = Some(finish_reason.to_string());
+            self.finalize_into(output);
         }
     }
 
@@ -1655,6 +2916,237 @@ fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, bytes: &[u8]) 
 fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
     let rest = line.strip_prefix(field)?.strip_prefix(':')?;
     Some(rest.strip_prefix(' ').unwrap_or(rest))
+}
+
+fn sse_event_and_data(block: &str) -> (Option<String>, Option<String>) {
+    let mut event_name = None;
+    let mut data_parts = Vec::new();
+    for line in block.lines() {
+        if let Some(event) = strip_sse_field(line, "event") {
+            event_name = Some(event.trim().to_string());
+        }
+        if let Some(data) = strip_sse_field(line, "data") {
+            data_parts.push(data.to_string());
+        }
+    }
+    let data = if data_parts.is_empty() {
+        None
+    } else {
+        Some(data_parts.join("\n"))
+    };
+    (event_name, data)
+}
+
+fn chat_content_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .or_else(|| part.get("content"))
+                    .and_then(Value::as_str)
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Null => String::new(),
+        value => value.to_string(),
+    }
+}
+
+fn anthropic_content_parts(content: &Value) -> Vec<Value> {
+    match content {
+        Value::String(text) if !text.is_empty() => vec![json!({ "type": "text", "text": text })],
+        Value::String(_) => Vec::new(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+                Some("text") => Some(json!({
+                    "type": "text",
+                    "text": part.get("text").and_then(Value::as_str).unwrap_or("")
+                })),
+                Some("image_url") => {
+                    let url = part
+                        .pointer("/image_url/url")
+                        .or_else(|| part.get("image_url"))
+                        .and_then(Value::as_str)?;
+                    if let Some((media_type, data)) = split_data_url(url) {
+                        Some(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": data
+                            }
+                        }))
+                    } else {
+                        Some(json!({
+                            "type": "image",
+                            "source": { "type": "url", "url": url }
+                        }))
+                    }
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn gemini_content_parts(content: &Value) -> Vec<Value> {
+    match content {
+        Value::String(text) if !text.is_empty() => vec![json!({ "text": text })],
+        Value::String(_) => Vec::new(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+                Some("text") => Some(json!({
+                    "text": part.get("text").and_then(Value::as_str).unwrap_or("")
+                })),
+                Some("image_url") => {
+                    let url = part
+                        .pointer("/image_url/url")
+                        .or_else(|| part.get("image_url"))
+                        .and_then(Value::as_str)?;
+                    if let Some((mime_type, data)) = split_data_url(url) {
+                        Some(json!({
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": data
+                            }
+                        }))
+                    } else {
+                        Some(json!({
+                            "fileData": {
+                                "mimeType": "application/octet-stream",
+                                "fileUri": url
+                            }
+                        }))
+                    }
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn split_data_url(url: &str) -> Option<(&str, &str)> {
+    let rest = url.strip_prefix("data:")?;
+    let (metadata, data) = rest.split_once(',')?;
+    let media_type = metadata.strip_suffix(";base64")?;
+    Some((media_type, data))
+}
+
+fn parse_json_or_string(value: &str) -> Value {
+    if value.trim().is_empty() {
+        return json!({});
+    }
+    match serde_json::from_str::<Value>(value) {
+        Ok(Value::Object(object)) => Value::Object(object),
+        Ok(value) => json!({ "input": value }),
+        Err(_) => json!({ "input": value }),
+    }
+}
+
+fn gemini_signature_cache() -> &'static Mutex<BTreeMap<String, String>> {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn remember_gemini_thought_signature(call_id: &str, signature: &str) {
+    if call_id.is_empty() || signature.is_empty() {
+        return;
+    }
+    let Ok(mut cache) = gemini_signature_cache().lock() else {
+        return;
+    };
+    if cache.len() >= GEMINI_SIGNATURE_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(call_id.to_string(), signature.to_string());
+}
+
+fn gemini_thought_signature(call_id: &str) -> Option<String> {
+    gemini_signature_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(call_id).cloned())
+}
+
+fn anthropic_usage_to_chat_usage(usage: Option<&Value>) -> Value {
+    let usage = usage.unwrap_or(&Value::Null);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_read = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_creation = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    json!({
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens + cache_creation,
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_creation
+    })
+}
+
+fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
+    let usage = usage.unwrap_or(&Value::Null);
+    let prompt_tokens = usage
+        .get("promptTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .get("cachedContentTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let completion_tokens = usage
+        .get("candidatesTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let reasoning_tokens = usage
+        .get("thoughtsTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    json!({
+        "promptTokenCount": prompt_tokens,
+        "cachedContentTokenCount": cached_tokens,
+        "candidatesTokenCount": completion_tokens,
+        "thoughtsTokenCount": reasoning_tokens,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens + reasoning_tokens,
+        "total_tokens": usage
+            .get("totalTokenCount")
+            .and_then(Value::as_u64)
+            .unwrap_or(prompt_tokens + completion_tokens + reasoning_tokens)
+    })
+}
+
+fn anthropic_finish_reason(reason: &str) -> &'static str {
+    match reason {
+        "max_tokens" => "length",
+        "tool_use" => "tool_calls",
+        _ => "stop",
+    }
+}
+
+fn gemini_finish_reason(reason: &str, has_tools: bool) -> &'static str {
+    match reason {
+        "MAX_TOKENS" => "length",
+        "STOP" if has_tools => "tool_calls",
+        _ => "stop",
+    }
 }
 
 fn chat_delta_reasoning_text(delta: &Value) -> Option<String> {

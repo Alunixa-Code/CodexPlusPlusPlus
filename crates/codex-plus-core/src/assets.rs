@@ -102,10 +102,12 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let paste_fix = paste_fix_enabled_config(settings);
     let force_chinese_locale = force_chinese_locale_config(settings);
     let fast_startup = fast_startup_config(settings);
+    let local_ads = crate::ads::local_ad_list();
     format!(
-        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\n{}\n{}",
+        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_LOCAL_ADS__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\n{}\n{}",
         serde_json::to_string(&helper_url).expect("helper URL should serialize"),
         serde_json::to_string(&sponsor_images).expect("sponsor images should serialize"),
+        serde_json::to_string(&local_ads).expect("local ads should serialize"),
         serde_json::to_string(crate::version::VERSION).expect("version should serialize"),
         serde_json::to_string(DIAGNOSTIC_BUILD_ID).expect("build id should serialize"),
         serde_json::to_string(&image_overlay).expect("image overlay config should serialize"),

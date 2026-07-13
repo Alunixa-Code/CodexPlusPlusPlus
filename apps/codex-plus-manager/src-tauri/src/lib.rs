@@ -25,6 +25,7 @@ pub fn run() {
         return;
     };
     let show_update = commands::startup_should_show_update();
+    let start_hidden = std::env::args().any(|arg| arg == "--hidden");
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -40,6 +41,9 @@ pub fn run() {
                     .min_inner_size(960.0, 720.0);
             if let Some(icon) = app.default_window_icon().cloned() {
                 main_window_builder = main_window_builder.icon(icon)?;
+            }
+            if start_hidden {
+                main_window_builder = main_window_builder.visible(false);
             }
             let main_window = main_window_builder.build()?;
             install_tray(app)?;
@@ -67,6 +71,8 @@ pub fn run() {
             commands::load_provider_sync_targets,
             commands::sync_providers_now,
             commands::load_ads,
+            commands::get_manager_autostart,
+            commands::set_manager_autostart_enabled,
             commands::refresh_script_market,
             commands::install_market_script,
             commands::set_user_script_enabled,

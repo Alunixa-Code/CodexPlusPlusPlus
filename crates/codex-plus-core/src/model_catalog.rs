@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::settings::{RelayProfile, SettingsStore};
+use crate::settings::{RelayProfile, RelayProtocol, SettingsStore};
 use serde_json::{Value, json};
 
 const BASE_URL_ENV_KEYS: &[&str] = &[
@@ -533,13 +533,29 @@ pub async fn fetch_relay_profile_model_ids(
     }
     let endpoint = models_endpoint(&source.base_url);
     let client = crate::http_client::proxied_client(&profile.user_agent)?;
-    let (models, status) = fetch_models_from_source(&client, &source).await;
+    let mut request = client
+        .get(&endpoint)
+        .header(reqwest::header::ACCEPT, "application/json");
+    request = match profile.protocol {
+        RelayProtocol::AnthropicMessages => request
+            .header("x-api-key", &source.api_key)
+            .header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => request.header("x-goog-api-key", &source.api_key),
+        _ => request.bearer_auth(&source.api_key),
+    };
+    let response = request.send().await?;
+    if !response.status().is_success() {
+        anyhow::bail!("HTTP {}", response.status().as_u16());
+    }
+    let payload = response.json::<Value>().await?;
+    let models = unique_strings(
+        parse_model_payload(&payload)
+            .into_iter()
+            .map(|model| model.strip_prefix("models/").unwrap_or(&model).to_string())
+            .collect(),
+    );
     if models.is_empty() {
-        let message = status
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("上游没有返回可用模型");
-        anyhow::bail!("{message}");
+        anyhow::bail!("上游没有返回可用模型");
     }
     Ok((models, endpoint))
 }

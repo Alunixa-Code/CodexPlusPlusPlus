@@ -96,10 +96,14 @@ pub fn relay_profile_from_ccs(
         context_selection_initialized: false,
         context_window: String::new(),
         auto_compact_limit: String::new(),
+        auto_compact_enabled: false,
+        auto_compact_percent: 80,
         model_insert_mode: Default::default(),
         model_list: String::new(),
         model_windows: String::new(),
         user_agent: String::new(),
+        custom_models: Vec::new(),
+        default_custom_model_id: String::new(),
     }
 }
 
@@ -255,6 +259,9 @@ fn build_config_toml(base_url: &str, api_key: &str, protocol: RelayProtocol) -> 
     let wire_api = match protocol {
         RelayProtocol::Responses => "responses",
         RelayProtocol::ChatCompletions => "chat",
+        RelayProtocol::Completions
+        | RelayProtocol::AnthropicMessages
+        | RelayProtocol::GeminiGenerateContent => "responses",
     };
     [
         "model_provider = \"CodexPlusPlus\"".to_string(),

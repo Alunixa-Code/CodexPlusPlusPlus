@@ -66,7 +66,7 @@ members = [
 version = "1.0.8"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/BigPizzaV3/CodexPlusPlus"
+repository = "https://github.com/ygzzfyh123/CodexPlusPlus"
 
 [workspace.dependencies]
 anyhow = "1"

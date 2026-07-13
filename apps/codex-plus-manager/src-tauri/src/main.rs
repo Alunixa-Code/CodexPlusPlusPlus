@@ -30,6 +30,11 @@ fn main() {
             std::env::set_var("CODEX_PLUS_SHOW_UPDATE", "1");
         }
     }
+    if std::env::args().any(|arg| arg == "--hidden") {
+        unsafe {
+            std::env::set_var("CODEX_PLUS_START_HIDDEN", "1");
+        }
+    }
     codex_plus_manager_lib::run();
 }
 

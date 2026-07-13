@@ -1411,7 +1411,7 @@ body {
 
 .protocol-options {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 8px;
 }
 
@@ -1420,13 +1420,16 @@ body {
 }
 
 .protocol-option {
-  min-height: 40px;
+  height: 52px;
   border: 1px solid hsl(var(--border) / 0.86);
   border-radius: 8px;
   background: hsl(var(--surface-sunken));
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
   transition:
     border-color 140ms ease,
     background-color 140ms ease,
@@ -3429,4 +3432,37 @@ body {
 
 .relay-model-row input {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.relay-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.custom-model-blocks {
+  display: grid;
+  gap: 12px;
+}
+
+.custom-model-block {
+  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.custom-model-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.custom-models-editor .relay-fields,
+.custom-model-block .relay-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
 }

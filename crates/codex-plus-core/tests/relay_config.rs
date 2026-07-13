@@ -325,24 +325,30 @@ model = "gpt-5-mini"
 }
 
 #[test]
-fn apply_chat_protocol_relay_points_codex_to_local_responses_proxy() {
-    let temp = tempfile::tempdir().unwrap();
-
-    let result = codex_plus_core::relay_config::apply_relay_config_to_home_with_protocol(
-        temp.path(),
-        "https://chat-only.example.test/v1",
-        "sk-test-redacted",
+fn transformed_protocol_relays_point_codex_to_local_responses_proxy() {
+    for protocol in [
         RelayProtocol::ChatCompletions,
-        57321,
-    )
-    .unwrap();
-    let updated = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        RelayProtocol::Completions,
+        RelayProtocol::AnthropicMessages,
+        RelayProtocol::GeminiGenerateContent,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let result = codex_plus_core::relay_config::apply_relay_config_to_home_with_protocol(
+            temp.path(),
+            "https://upstream.example.test/v1",
+            "sk-test-redacted",
+            protocol,
+            57321,
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
 
-    assert!(result.configured);
-    assert!(updated.contains(r#"wire_api = "responses""#));
-    assert!(updated.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
-    assert!(updated.contains(r#"experimental_bearer_token = "sk-test-redacted""#));
-    assert!(!updated.contains("codex_plus_chat_base_url"));
+        assert!(result.configured);
+        assert!(updated.contains(r#"wire_api = "responses""#));
+        assert!(updated.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
+        assert!(updated.contains(r#"experimental_bearer_token = "sk-test-redacted""#));
+        assert!(!updated.contains("codex_plus_chat_base_url"));
+    }
 }
 
 #[test]

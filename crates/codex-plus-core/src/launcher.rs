@@ -1177,6 +1177,23 @@ async fn handle_models_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
+    let settings = crate::settings::SettingsStore::default()
+        .load()
+        .unwrap_or_default();
+    let active = settings.active_relay_profile();
+    if active.relay_mode == crate::settings::RelayMode::CustomModels {
+        let body = serde_json::to_vec(&crate::protocol_proxy::custom_models_list_payload(&active))?;
+        write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
+        log_helper_response(
+            "helper.models_proxy_ok",
+            method,
+            path,
+            "200 OK",
+            remote_addr_text,
+        );
+        stream.shutdown().await?;
+        return Ok(());
+    }
     let upstream = match crate::protocol_proxy::open_models_proxy_request(request_user_agent).await
     {
         Ok(upstream) => upstream,
@@ -1209,7 +1226,18 @@ async fn handle_models_proxy_connection(
     } else {
         upstream.content_type.clone()
     };
-    let body = upstream.response.bytes().await?.to_vec();
+    let mut body = upstream.response.bytes().await?.to_vec();
+    if is_success
+        && matches!(
+            upstream.wire_api,
+            crate::protocol_proxy::UpstreamWireApi::AnthropicMessages
+                | crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent
+        )
+    {
+        if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) {
+            body = serde_json::to_vec(&crate::protocol_proxy::normalize_models_payload(&payload))?;
+        }
+    }
     write_http_response(stream, &status, &content_type, &body).await?;
     log_helper_response(
         if is_success {
@@ -1305,18 +1333,49 @@ async fn handle_protocol_proxy_connection(
             stream.shutdown().await?;
             return Ok(());
         }
-        let mut converter = request_json
-            .as_ref()
-            .map(crate::protocol_proxy::ChatSseToResponsesConverter::with_request)
-            .unwrap_or_default();
+        let fallback_request = serde_json::json!({});
+        let original_request = request_json.as_ref().unwrap_or(&fallback_request);
+        let mut converter = crate::protocol_proxy::UpstreamSseToResponsesConverter::with_request(
+            upstream.wire_api,
+            original_request,
+        )
+        .ok_or_else(|| anyhow::anyhow!("无法为上游协议创建流转换器"))?;
         let mut bytes_stream = upstream.response.bytes_stream();
         let mut stream_failed = false;
-        while let Some(chunk) = bytes_stream.next().await {
+        loop {
+            let next = match tokio::time::timeout(
+                crate::protocol_proxy::upstream_stream_idle_timeout(),
+                bytes_stream.next(),
+            )
+            .await
+            {
+                Ok(next) => next,
+                Err(_) => {
+                    let failed = converter.fail(
+                        format!(
+                            "上游流超过 {} 秒没有新数据",
+                            crate::protocol_proxy::upstream_stream_idle_timeout().as_secs()
+                        ),
+                        Some("stream_idle_timeout".to_string()),
+                    );
+                    if !failed.is_empty() {
+                        stream.write_all(&failed).await?;
+                    }
+                    stream_failed = true;
+                    break;
+                }
+            };
+            let Some(chunk) = next else {
+                break;
+            };
             match chunk {
                 Ok(bytes) => {
                     let converted = converter.push_bytes(&bytes);
                     if !converted.is_empty() {
                         stream.write_all(&converted).await?;
+                    }
+                    if converter.is_completed() {
+                        break;
                     }
                 }
                 Err(error) => {
@@ -1371,11 +1430,35 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let chat_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
-    let response_json = if let Some(request_json) = request_json.as_ref() {
-        crate::protocol_proxy::chat_completion_to_response_with_request(chat_json, request_json)?
-    } else {
-        crate::protocol_proxy::chat_completion_to_response(chat_json)?
+    let upstream_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
+    let fallback_request = serde_json::json!({});
+    let original_request = request_json.as_ref().unwrap_or(&fallback_request);
+    let response_json = match upstream.wire_api {
+        crate::protocol_proxy::UpstreamWireApi::ChatCompletions => {
+            crate::protocol_proxy::chat_completion_to_response_with_request(
+                upstream_json,
+                original_request,
+            )?
+        }
+        crate::protocol_proxy::UpstreamWireApi::Completions => {
+            crate::protocol_proxy::completion_to_response_with_request(
+                upstream_json,
+                original_request,
+            )?
+        }
+        crate::protocol_proxy::UpstreamWireApi::AnthropicMessages => {
+            crate::protocol_proxy::anthropic_message_to_response_with_request(
+                upstream_json,
+                original_request,
+            )?
+        }
+        crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent => {
+            crate::protocol_proxy::gemini_generate_content_to_response_with_request(
+                upstream_json,
+                original_request,
+            )?
+        }
+        crate::protocol_proxy::UpstreamWireApi::Responses => upstream_json,
     };
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;

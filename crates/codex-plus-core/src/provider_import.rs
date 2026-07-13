@@ -206,10 +206,14 @@ fn relay_profile_from_request(
         context_selection_initialized: false,
         context_window: String::new(),
         auto_compact_limit: String::new(),
+        auto_compact_enabled: false,
+        auto_compact_percent: 80,
         model_insert_mode: Default::default(),
         model_list: String::new(),
         model_windows: String::new(),
         user_agent: String::new(),
+        custom_models: Vec::new(),
+        default_custom_model_id: String::new(),
     }
 }
 
@@ -244,6 +248,15 @@ fn normalize_request(mut request: ProviderImportRequest) -> anyhow::Result<Provi
 fn relay_protocol(value: &str) -> RelayProtocol {
     match value.trim().to_ascii_lowercase().as_str() {
         "chat" | "chat_completions" | "chat-completions" => RelayProtocol::ChatCompletions,
+        "completions" | "completion" => RelayProtocol::Completions,
+        "messages" | "anthropic" | "anthropic_messages" | "anthropic-messages" => {
+            RelayProtocol::AnthropicMessages
+        }
+        "gemini"
+        | "generate_content"
+        | "generate-content"
+        | "gemini_generate_content"
+        | "gemini-generate-content" => RelayProtocol::GeminiGenerateContent,
         _ => RelayProtocol::Responses,
     }
 }
@@ -261,6 +274,9 @@ fn build_config_toml(base_url: &str, api_key: &str, protocol: RelayProtocol) -> 
     let wire_api = match protocol {
         RelayProtocol::Responses => "responses",
         RelayProtocol::ChatCompletions => "chat",
+        RelayProtocol::Completions
+        | RelayProtocol::AnthropicMessages
+        | RelayProtocol::GeminiGenerateContent => "responses",
     };
     [
         "model_provider = \"CodexPlusPlus\"".to_string(),

@@ -9,7 +9,12 @@
 
 export type PresetCategory = "official" | "aggregator" | "third_party" | "cn_official";
 
-export type RelayProtocol = "responses" | "chatCompletions";
+export type RelayProtocol =
+  | "responses"
+  | "chatCompletions"
+  | "completions"
+  | "anthropicMessages"
+  | "geminiGenerateContent";
 
 export interface ProviderPreset {
   id: string;

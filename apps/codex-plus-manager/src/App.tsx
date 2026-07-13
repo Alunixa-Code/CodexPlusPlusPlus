@@ -210,10 +210,25 @@ export type RelayProfile = {
   contextSelectionInitialized: boolean;
   contextWindow: string;
   autoCompactLimit: string;
+  autoCompactEnabled: boolean;
+  autoCompactPercent: number;
   modelList: string;
   modelWindows: string;
   userAgent: string;
+  customModels: CustomRelayModel[];
+  defaultCustomModelId: string;
   aggregate?: RelayAggregateConfig | null;
+};
+
+type CustomRelayModel = {
+  id: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  protocol: RelayProtocol;
+  contextWindow: string;
+  autoCompactEnabled: boolean;
+  autoCompactPercent: number;
 };
 
 type RelayAggregateStrategy = "failover" | "conversationRoundRobin" | "requestRoundRobin" | "weightedRoundRobin";
@@ -259,10 +274,22 @@ type CodexContextEntries = {
   plugins: CodexContextEntry[];
 };
 
-type RelayProtocol = "responses" | "chatCompletions";
-type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate";
+type RelayProtocol =
+  | "responses"
+  | "chatCompletions"
+  | "completions"
+  | "anthropicMessages"
+  | "geminiGenerateContent";
+type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate" | "customModels";
 const PROTOCOL_PROXY_BASE_URL = "http://127.0.0.1:57321/v1";
 const CHAT_UPSTREAM_BASE_URL_KEY = "codex_plus_chat_base_url";
+const RELAY_PROTOCOL_OPTIONS: Array<{ value: RelayProtocol; label: string }> = [
+  { value: "chatCompletions", label: "/v1/chat/completions" },
+  { value: "completions", label: "/v1/completions" },
+  { value: "anthropicMessages", label: "/v1/messages" },
+  { value: "geminiGenerateContent", label: "/v1/models/{model_id}:generateContent" },
+  { value: "responses", label: "/v1/responses" },
+];
 const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/BigPizzaV3/CodexPlusPlusScriptMarket";
 
 const emptyContextSelection = (): RelayContextSelection => ({
@@ -744,9 +771,13 @@ const defaultSettings: BackendSettings = {
       contextSelectionInitialized: true,
       contextWindow: "",
       autoCompactLimit: "",
+      autoCompactEnabled: false,
+      autoCompactPercent: 80,
       modelList: "",
       modelWindows: "",
       userAgent: "",
+      customModels: [],
+      defaultCustomModelId: "",
     },
   ],
   relayCommonConfigContents: "",
@@ -2345,40 +2376,6 @@ function OverviewScreen({
   const health = healthItems(overview);
   return (
     <>
-      <Panel className="jojocode-overview">
-        <CardContent>
-          <div className="jojocode-overview-layout">
-            <div className="jojocode-overview-main">
-              <div className="jojocode-overview-mark">
-                <Network className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="eyebrow">{t("官方中转站")}</span>
-                <h2>JOJO Code</h2>
-                <p>
-                  {t("Codex++ 官方中转站，主打稳定接入和划算价格，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。")}
-                </p>
-              </div>
-            </div>
-            <div className="jojocode-overview-side">
-              <div className="jojocode-model-tags">
-                <span>GPT-5.6 全系列</span>
-                <span>Fable 5</span>
-                <span>Sonnet 5</span>
-                <span>GPT-5.5</span>
-                <span>GPT-5.4</span>
-                <span>Opus 4.8</span>
-                <span>Opus 4.7</span>
-                <span>gpt-image-2</span>
-              </div>
-              <Button onClick={() => void actions.openExternalUrl("https://jojocode.com/")}>
-                <ExternalLink className="h-4 w-4" />
-                {t("打开 JOJO Code")}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Panel>
       <Panel>
         <CardHead title={t("健康检查")} detail={t("概览只展示关键问题，具体配置在对应页面处理")} />
         <CardContent>
@@ -2447,13 +2444,13 @@ function RelayEnvironmentScreen({ result, actions }: { result: RelayEnvironmentR
     {
       id: "clash-verge-tun",
       title: t("Clash Verge Rev TUN 模式"),
-      passed: result ? !result.clashVergeTun.enabled : false,
+      passed: result ? result.clashVergeTun.enabled : false,
       detail: result
         ? result.clashVergeTun.enabled
-          ? tf("检测到 TUN 模式已开启，请在 Clash Verge Rev 中关闭。配置：{0}", [result.clashVergeTun.configPath || t("未记录路径")])
+          ? tf("TUN 模式已开启。配置：{0}", [result.clashVergeTun.configPath || t("未记录路径")])
           : result.clashVergeTun.configPath
-            ? tf("TUN 模式已关闭。配置：{0}", [result.clashVergeTun.configPath])
-            : t("未发现 Clash Verge Rev 配置，按未开启处理。")
+            ? tf("检测到 TUN 模式已关闭，请在 Clash Verge Rev 中开启。配置：{0}", [result.clashVergeTun.configPath])
+            : t("未发现 Clash Verge Rev 配置，按 TUN 未确认开启处理。")
         : t("等待检测。"),
     },
     {
@@ -2624,6 +2621,16 @@ function RelayScreen({
             >
               <Plus className="h-4 w-4" />
               {t("添加供应商")}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setNewProfileDraft(createCustomModelsRelayProfile(normalized));
+                setDetailProfileId(null);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              {t("添加供应商(可自定义)")}
             </Button>
             <Button
               variant="secondary"
@@ -3292,35 +3299,12 @@ function SessionsScreen({
 
 function RecommendationsScreen({ ads, actions }: { ads: AdsResult | null; actions: Actions }) {
   const items = (ads?.ads ?? []).filter((ad) => !isExpiredAd(ad));
-  const sponsors = items.filter((ad) => ad.type === "sponsor");
-  const normal = items.filter((ad) => ad.type === "normal");
   return (
     <>
       <Panel>
-        <CardHead title={t("推荐内容")} detail={t("与 Codex 内插件菜单使用同一个远端广告源")} />
+        <CardHead title={t("推荐内容")} detail={t("本地内置推荐，断网也可完整显示")} />
         <CardContent>
-          <div className="recommend-hero">
-            <div>
-              <strong>{ads ? tf("已加载 {0} 条推荐", [items.length]) : t("尚未加载推荐内容")}</strong>
-              <span>{t("内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。")}</span>
-            </div>
-            <Button onClick={() => void actions.refreshAds()}>
-              <RefreshCw className="h-4 w-4" />
-              {t("刷新推荐")}
-            </Button>
-          </div>
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("赞助商推荐")} detail={tf("{0} 条", [sponsors.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={sponsors} empty={t("暂无赞助商推荐。")} />
-        </CardContent>
-      </Panel>
-      <Panel>
-        <CardHead title={t("普通推荐")} detail={tf("{0} 条", [normal.length])} />
-        <CardContent>
-          <AdGrid actions={actions} ads={normal} empty={t("暂无普通推荐。")} />
+          <AdGrid actions={actions} ads={items} empty={t("暂无推荐内容。")} />
         </CardContent>
       </Panel>
     </>
@@ -3469,24 +3453,16 @@ function AboutScreen({
           <div className="metric-list">
             <Metric label={t("Codex++ 版本")} value={overview?.current_version ?? update?.currentVersion ?? "-"} />
             <Metric label={t("Codex 版本")} value={overview?.codex_version ?? t("未检测到")} />
-            <Metric label={t("项目地址")} value="github.com/BigPizzaV3/CodexPlusPlus" />
+            <Metric label={t("项目地址")} value="github.com/ygzzfyh123/CodexPlusPlus" />
           </div>
           <Toolbar>
-            <Button onClick={() => void actions.openExternalUrl("https://github.com/BigPizzaV3/CodexPlusPlus")} variant="secondary">
+            <Button onClick={() => void actions.openExternalUrl("https://github.com/ygzzfyh123/CodexPlusPlus")} variant="secondary">
               <ExternalLink className="h-4 w-4" />
               {t("打开项目主页")}
             </Button>
-            <Button onClick={() => void actions.openExternalUrl("https://github.com/BigPizzaV3/CodexPlusPlus/issues")} variant="secondary">
+            <Button onClick={() => void actions.openExternalUrl("https://github.com/ygzzfyh123/CodexPlusPlus/issues")} variant="secondary">
               <ExternalLink className="h-4 w-4" />
               {t("反馈问题")}
-            </Button>
-            <Button onClick={() => void actions.openExternalUrl("https://discord.gg/y96kX7A76v")} variant="secondary">
-              <MessageCircle className="h-4 w-4" />
-              Discord
-            </Button>
-            <Button onClick={() => void actions.openExternalUrl("https://t.me/CodexPlusPlus")} variant="secondary">
-              <MessageCircle className="h-4 w-4" />
-              Telegram
             </Button>
           </Toolbar>
         </CardContent>
@@ -3529,11 +3505,72 @@ function SettingsScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
+  const [autostart, setAutostart] = useState<{ supported: boolean; enabled: boolean; executablePath: string } | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await invoke<{ status: string; message: string; supported: boolean; enabled: boolean; executablePath: string }>("get_manager_autostart");
+        if (!cancelled) {
+          setAutostart({
+            supported: !!result.supported,
+            enabled: !!result.enabled,
+            executablePath: result.executablePath || "",
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setAutostart({ supported: false, enabled: false, executablePath: "" });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const toggleAutostart = async (enabled: boolean) => {
+    if (!autostart || autostartBusy) return;
+    const previous = autostart;
+    setAutostart({ ...autostart, enabled });
+    setAutostartBusy(true);
+    try {
+      const result = await invoke<{ status: string; message: string; supported: boolean; enabled: boolean; executablePath: string }>("set_manager_autostart_enabled", { enabled });
+      setAutostart({
+        supported: !!result.supported,
+        enabled: !!result.enabled,
+        executablePath: result.executablePath || "",
+      });
+      if (result.status && result.status !== "ok" && result.status !== "success") {
+        setAutostart(previous);
+      }
+    } catch {
+      setAutostart(previous);
+    } finally {
+      setAutostartBusy(false);
+    }
+  };
   return (
     <>
       <Panel>
         <CardHead title={t("基础设置")} detail={settings?.settings_path ?? ""} />
         <CardContent>
+          <label className="switch-row">
+            <input
+              checked={!!autostart?.enabled}
+              disabled={!autostart?.supported || autostartBusy}
+              onChange={(event) => void toggleAutostart(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>{t("开机时启动 Codex++ 管理器")}</strong>
+              <small>
+                {autostart?.supported
+                  ? t("写入当前用户开机启动项，登录后仅显示托盘。")
+                  : t("当前平台不支持开机自启。")}
+              </small>
+            </span>
+          </label>
           <div className="theme-row">
             <div>
               <strong>{t("界面主题")}</strong>
@@ -4209,10 +4246,31 @@ function RelayProfileEditor({
       />
     );
   }
+  if (isCustomModelsRelayProfile(profile)) {
+    return (
+      <CustomModelsRelayProfileEditor
+        profile={profile}
+        form={form}
+        isNew={isNew}
+        onProfileChange={onProfileChange}
+        onSwitch={onSwitch}
+        actions={actions}
+      />
+    );
+  }
 
   const showApiFields = profile.relayMode !== "official" || profile.officialMixApiKey;
   const updateDraft = (patch: Partial<RelayProfile>) => {
-    onProfileChange(applyRelayProfilePatchToFiles(profile, patch, { allowGenerateFiles: isNew }));
+    let nextPatch = { ...patch };
+    if ("autoCompactEnabled" in nextPatch || "autoCompactPercent" in nextPatch || "contextWindow" in nextPatch) {
+      const enabled = nextPatch.autoCompactEnabled ?? profile.autoCompactEnabled;
+      const percent = nextPatch.autoCompactPercent ?? profile.autoCompactPercent;
+      const contextWindow = nextPatch.contextWindow ?? profile.contextWindow;
+      if (enabled) {
+        nextPatch.autoCompactLimit = autoCompactLimitFromPercent(contextWindow, percent);
+      }
+    }
+    onProfileChange(applyRelayProfilePatchToFiles(profile, nextPatch, { allowGenerateFiles: isNew }));
   };
   const updateModelWindowRow = (index: number, patch: Partial<ModelWindowRow>) => {
     setModelWindowRows(
@@ -4339,13 +4397,33 @@ function RelayProfileEditor({
                 placeholder={t("留空不改写，例如 200000")}
               />
             </Field>
-            <Field className="relay-field-auto-compact" label={t("压缩上下文大小")}>
+            <Field className="relay-field-auto-compact" label={t("自动压缩百分比")}>
+              <label className="inline-check">
+                <input
+                  checked={profile.autoCompactEnabled}
+                  onChange={(event) => updateDraft({ autoCompactEnabled: event.currentTarget.checked })}
+                  type="checkbox"
+                />
+                <span>{t("启用自动压缩")}</span>
+              </label>
               <Input
+                disabled={!profile.autoCompactEnabled}
                 inputMode="numeric"
-                value={profile.autoCompactLimit}
-                onChange={(event) => updateDraft({ autoCompactLimit: event.currentTarget.value.replace(/[^\d]/g, "") })}
-                placeholder={t("留空不改写，例如 160000")}
+                max={100}
+                min={1}
+                type="number"
+                value={profile.autoCompactPercent || 80}
+                onChange={(event) => updateDraft({ autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
+                placeholder="80"
               />
+              <p className="field-hint">
+                {profile.autoCompactEnabled
+                  ? tf("将按上下文窗口的 {0}% 写入压缩阈值{1}", [
+                      profile.autoCompactPercent || 80,
+                      profile.contextWindow ? `（约 ${autoCompactLimitFromPercent(profile.contextWindow, profile.autoCompactPercent || 80)} tokens）` : "",
+                    ])
+                  : t("关闭时不写自动压缩阈值；开启后需要有效上下文窗口。")}
+              </p>
             </Field>
           </div>
         ) : null}
@@ -4380,20 +4458,16 @@ function RelayProfileEditor({
             </Field>
             <Field className="relay-field-protocol" label={t("上游协议")}>
               <div className="protocol-options">
-                <button
-                  className={`protocol-option ${profile.protocol === "responses" ? "active" : ""}`}
-                  onClick={() => updateDraft({ protocol: "responses" })}
-                  type="button"
-                >
-                  Responses API
-                </button>
-                <button
-                  className={`protocol-option ${profile.protocol === "chatCompletions" ? "active" : ""}`}
-                  onClick={() => updateDraft({ protocol: "chatCompletions" })}
-                  type="button"
-                >
-                  Chat Completions
-                </button>
+                {RELAY_PROTOCOL_OPTIONS.map((option) => (
+                  <button
+                    className={`protocol-option ${profile.protocol === option.value ? "active" : ""}`}
+                    key={option.value}
+                    onClick={() => updateDraft({ protocol: option.value })}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
             </Field>
           </div>
@@ -4422,7 +4496,7 @@ function RelayProfileEditor({
                 <span />
               </div>
               {modelWindowRows.map((row, index) => (
-                <div className="relay-model-row" key={`${index}-${row.model}`}>
+                <div className="relay-model-row" key={index}>
                   <Input
                     value={row.model}
                     onChange={(event) => updateModelWindowRow(index, { model: event.currentTarget.value })}
@@ -4491,7 +4565,7 @@ function RelayProfileEditor({
           </Field>
         ) : null}
       </div>
-      {showApiFields && profile.protocol === "chatCompletions" ? (
+      {showApiFields && profile.protocol !== "responses" ? (
         <div className="hint-line relay-protocol-hint">
           <MessageCircle className="h-4 w-4" />
           <span>{t("此上游会通过本地 127.0.0.1:57321 转成 Responses API，需要从 Codex++ 启动 Codex。")}</span>
@@ -4514,6 +4588,183 @@ function RelayProfileEditor({
   );
 }
 
+function CustomModelsRelayProfileEditor({
+  profile,
+  form,
+  isNew = false,
+  onProfileChange,
+  onSwitch,
+  actions,
+}: {
+  profile: RelayProfile;
+  form: BackendSettings;
+  isNew?: boolean;
+  onProfileChange: (value: RelayProfile) => void;
+  onSwitch: () => void;
+  actions: Actions;
+}) {
+  const models = profile.customModels?.length ? profile.customModels : [createEmptyCustomModel()];
+  const updateModel = (index: number, patch: Partial<CustomRelayModel>) => {
+    const nextModels = models.map((model, modelIndex) => (modelIndex === index ? { ...model, ...patch } : model));
+    onProfileChange({
+      ...profile,
+      customModels: nextModels,
+      defaultCustomModelId:
+        profile.defaultCustomModelId && nextModels.some((model) => model.id === profile.defaultCustomModelId)
+          ? profile.defaultCustomModelId
+          : nextModels[0]?.id || "",
+      model: (nextModels.find((model) => model.id === (profile.defaultCustomModelId || nextModels[0]?.id)) || nextModels[0])?.model || "",
+    });
+  };
+  const addModel = () => {
+    const model = createEmptyCustomModel();
+    onProfileChange({
+      ...profile,
+      customModels: [...models, model],
+      defaultCustomModelId: profile.defaultCustomModelId || model.id,
+    });
+  };
+  const removeModel = (index: number) => {
+    const nextModels = models.filter((_, modelIndex) => modelIndex !== index);
+    const fallback = nextModels[0] || createEmptyCustomModel();
+    const ensured = nextModels.length ? nextModels : [fallback];
+    onProfileChange({
+      ...profile,
+      customModels: ensured,
+      defaultCustomModelId: ensured.some((model) => model.id === profile.defaultCustomModelId)
+        ? profile.defaultCustomModelId
+        : ensured[0].id,
+      model: (ensured.find((model) => model.id === profile.defaultCustomModelId) || ensured[0]).model,
+    });
+  };
+  const testModel = async (model: CustomRelayModel) => {
+    await actions.testRelayProfile({
+      ...profile,
+      model: model.model,
+      baseUrl: model.baseUrl,
+      upstreamBaseUrl: model.baseUrl,
+      apiKey: model.apiKey,
+      protocol: model.protocol,
+      relayMode: "pureApi",
+      testModel: model.model,
+    });
+  };
+  return (
+    <div className="relay-profile-editor custom-models-editor">
+      <div className="relay-editor-head">
+        <div>
+          <strong>{profile.name || t("未命名供应商")}</strong>
+          <span>{t("按模型独立配置 Base URL、Key 与协议")}</span>
+        </div>
+        {isNew ? null : (
+          <Button
+            disabled={!form.relayProfilesEnabled || actions.relaySwitching}
+            onClick={onSwitch}
+            variant={profile.id === form.activeRelayId ? "secondary" : "default"}
+          >
+            {actions.relaySwitching ? t("切换中") : profile.id === form.activeRelayId ? t("使用中") : t("设为当前")}
+          </Button>
+        )}
+      </div>
+      <div className="relay-fields">
+        <Field className="relay-field-name" label={t("名称")}>
+          <Input value={profile.name} onChange={(event) => onProfileChange({ ...profile, name: event.currentTarget.value })} />
+        </Field>
+        <Field className="relay-field-config-model" label={t("默认模型")}>
+          <select
+            className="field-select"
+            value={profile.defaultCustomModelId || models[0]?.id || ""}
+            onChange={(event) => {
+              const selected = models.find((model) => model.id === event.currentTarget.value) || models[0];
+              onProfileChange({
+                ...profile,
+                defaultCustomModelId: selected?.id || "",
+                model: selected?.model || "",
+              });
+            }}
+          >
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.model || t("未命名模型")}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="custom-model-blocks">
+        {models.map((model, index) => (
+          <div className="custom-model-block" key={model.id}>
+            <div className="custom-model-block-head">
+              <strong>{tf("模型 {0}", [index + 1])}</strong>
+              <Button onClick={() => removeModel(index)} size="sm" type="button" variant="ghost">
+                <Trash2 className="h-4 w-4" />
+                {t("删除模型")}
+              </Button>
+            </div>
+            <div className="relay-fields">
+              <Field label={t("模型名称")}>
+                <Input value={model.model} onChange={(event) => updateModel(index, { model: event.currentTarget.value })} placeholder="gpt-5.4" />
+              </Field>
+              <Field label="Base URL">
+                <Input value={model.baseUrl} onChange={(event) => updateModel(index, { baseUrl: event.currentTarget.value })} placeholder="https://api.example.com/v1" />
+              </Field>
+              <Field label="Key">
+                <Input type="password" value={model.apiKey} onChange={(event) => updateModel(index, { apiKey: event.currentTarget.value })} />
+              </Field>
+              <Field label={t("上游协议")}>
+                <div className="protocol-options">
+                  {RELAY_PROTOCOL_OPTIONS.map((option) => (
+                    <button
+                      className={`protocol-option ${model.protocol === option.value ? "active" : ""}`}
+                      key={option.value}
+                      onClick={() => updateModel(index, { protocol: option.value })}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label={t("上下文窗口")}>
+                <Input value={model.contextWindow} onChange={(event) => updateModel(index, { contextWindow: event.currentTarget.value })} placeholder="200000 / 1M" />
+              </Field>
+              <Field label={t("自动压缩百分比")}>
+                <label className="inline-check">
+                  <input
+                    checked={model.autoCompactEnabled}
+                    onChange={(event) => updateModel(index, { autoCompactEnabled: event.currentTarget.checked })}
+                    type="checkbox"
+                  />
+                  <span>{t("启用自动压缩")}</span>
+                </label>
+                <Input
+                  disabled={!model.autoCompactEnabled}
+                  inputMode="numeric"
+                  max={100}
+                  min={1}
+                  type="number"
+                  value={model.autoCompactPercent || 80}
+                  onChange={(event) => updateModel(index, { autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
+                />
+              </Field>
+            </div>
+            <Toolbar>
+              <Button onClick={() => void testModel(model)} size="sm" type="button" variant="secondary">
+                {t("测试此模型")}
+              </Button>
+            </Toolbar>
+          </div>
+        ))}
+      </div>
+      <Toolbar>
+        <Button onClick={addModel} size="sm" type="button" variant="secondary">
+          <Plus className="h-4 w-4" />
+          {t("添加模型")}
+        </Button>
+      </Toolbar>
+    </div>
+  );
+}
 function AggregateRelayProfileEditor({
   profile,
   form,
@@ -6162,9 +6413,13 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
             contextSelectionInitialized: true,
             contextWindow: "",
             autoCompactLimit: "",
+            autoCompactEnabled: false,
+            autoCompactPercent: 80,
             modelList: "",
             modelWindows: "",
             userAgent: "",
+            customModels: [],
+            defaultCustomModelId: "",
           },
         ];
   const activeRelayId = profiles.some((profile) => profile.id === settings.activeRelayId)
@@ -6230,8 +6485,12 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         contextSelectionInitialized: true,
         contextWindow: "",
         autoCompactLimit: "",
+        autoCompactEnabled: false,
+        autoCompactPercent: 80,
         modelList: "",
         modelWindows: "",
+        customModels: [],
+        defaultCustomModelId: "",
       },
       null,
     );
@@ -6244,7 +6503,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     baseUrl: profile.baseUrl || defaultSettings.relayBaseUrl,
     upstreamBaseUrl: profile.upstreamBaseUrl || profile.baseUrl || "",
     apiKey: profile.apiKey || "",
-    protocol: profile.protocol === "chatCompletions" ? "chatCompletions" : "responses",
+    protocol: normalizeRelayProtocol(profile.protocol),
     relayMode,
     officialMixApiKey,
     testModel: profile.testModel || "",
@@ -6257,11 +6516,42 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     contextSelectionInitialized: true,
     contextWindow: profile.contextWindow || "",
     autoCompactLimit: profile.autoCompactLimit || "",
+    autoCompactEnabled: profile.autoCompactEnabled === true,
+    autoCompactPercent: typeof profile.autoCompactPercent === "number" ? Math.min(100, Math.max(1, Math.round(profile.autoCompactPercent))) : 80,
     modelList: profile.modelList || "",
     modelWindows: profile.modelWindows || "",
     userAgent: profile.userAgent || "",
+    customModels: Array.isArray(profile.customModels)
+      ? profile.customModels.map((model) => ({
+          id: model.id || createEmptyCustomModel().id,
+          model: model.model || "",
+          baseUrl: model.baseUrl || "",
+          apiKey: model.apiKey || "",
+          protocol: normalizeRelayProtocol(model.protocol),
+          contextWindow: model.contextWindow || "",
+          autoCompactEnabled: model.autoCompactEnabled === true,
+          autoCompactPercent: typeof model.autoCompactPercent === "number" ? Math.min(100, Math.max(1, Math.round(model.autoCompactPercent))) : 80,
+        }))
+      : [],
+    defaultCustomModelId: profile.defaultCustomModelId || "",
     aggregate: null,
   };
+  normalized = migrateLegacyAutoCompact(normalized);
+  if (normalized.relayMode === "customModels") {
+    if (!normalized.customModels.length) {
+      const model = createEmptyCustomModel();
+      normalized.customModels = [model];
+      normalized.defaultCustomModelId = model.id;
+    } else if (!normalized.defaultCustomModelId || !normalized.customModels.some((item) => item.id === normalized.defaultCustomModelId)) {
+      normalized.defaultCustomModelId = normalized.customModels[0].id;
+    }
+    const defaultModel = normalized.customModels.find((item) => item.id === normalized.defaultCustomModelId) || normalized.customModels[0];
+    normalized.model = defaultModel?.model || "";
+    normalized.baseUrl = PROTOCOL_PROXY_BASE_URL;
+    normalized.upstreamBaseUrl = "";
+    normalized.apiKey = "codex-plus-custom";
+    return normalized;
+  }
   return relayProfileUsesLiveFiles(normalized) ? deriveRelayProfileFromFiles(normalized) : normalized;
 }
 
@@ -6290,7 +6580,19 @@ function activeRelayProfile(settings: BackendSettings): RelayProfile {
 }
 
 function relayProtocolLabel(protocol: RelayProtocol): string {
-  return protocol === "chatCompletions" ? t("Chat Completions 转 Responses") : "Responses API";
+  return RELAY_PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ?? "/v1/responses";
+}
+
+function normalizeRelayProtocol(protocol: RelayProtocol | string | undefined): RelayProtocol {
+  if (
+    protocol === "chatCompletions" ||
+    protocol === "completions" ||
+    protocol === "anthropicMessages" ||
+    protocol === "geminiGenerateContent"
+  ) {
+    return protocol;
+  }
+  return "responses";
 }
 
 function ccsProviderSummary(result: CcsProvidersResult | null): string {
@@ -6303,6 +6605,7 @@ function ccsProviderSummary(result: CcsProvidersResult | null): string {
 function normalizeRelayMode(mode: RelayMode | undefined): RelayMode {
   if (mode === "aggregate") return mode;
   if (mode === "pureApi") return mode;
+  if (mode === "customModels") return mode;
   return "official";
 }
 
@@ -6326,6 +6629,7 @@ function normalizeContextSelection(
 
 function relayModeLabel(mode: RelayMode): string {
   if (mode === "aggregate") return t("聚合供应商");
+  if (mode === "customModels") return t("自定义模型路由");
   if (mode === "pureApi") return t("纯 API");
   return t("官方登录");
 }
@@ -6333,9 +6637,14 @@ function relayModeLabel(mode: RelayMode): string {
 function providerImportWireApiLabel(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (normalized === "chat" || normalized === "chat_completions" || normalized === "chat-completions") {
-    return "Chat Completions";
+    return "/v1/chat/completions";
   }
-  return "Responses";
+  if (normalized === "completions" || normalized === "completion") return "/v1/completions";
+  if (normalized === "messages" || normalized === "anthropic_messages") return "/v1/messages";
+  if (normalized === "gemini" || normalized === "generate_content") {
+    return "/v1/models/{model_id}:generateContent";
+  }
+  return "/v1/responses";
 }
 
 function providerImportRelayModeLabel(value: string): string {
@@ -6365,7 +6674,7 @@ function relayProfileConfigBrief(profile: RelayProfile): string {
 function relayProfileLatencyTarget(profile: RelayProfile): string {
   if (isAggregateRelayProfile(profile)) return "";
   if (profile.relayMode === "official" && !profile.officialMixApiKey) return "";
-  if (profile.protocol === "chatCompletions") {
+  if (profile.protocol !== "responses") {
     return (profile.upstreamBaseUrl || profile.baseUrl).trim();
   }
   return profile.baseUrl.trim();
@@ -6440,7 +6749,7 @@ function buildRelayConfigToml(
   profile: Pick<RelayProfile, "model" | "baseUrl" | "upstreamBaseUrl" | "apiKey" | "protocol">,
   options: { includeBearerToken: boolean },
 ): string {
-  const baseUrl = profile.protocol === "chatCompletions" ? PROTOCOL_PROXY_BASE_URL : profile.baseUrl.trim();
+  const baseUrl = profile.protocol !== "responses" ? PROTOCOL_PROXY_BASE_URL : profile.baseUrl.trim();
   const apiKey = profile.apiKey.trim();
   const rootLines = [
     profile.model.trim() ? `model = "${tomlString(profile.model.trim())}"` : null,
@@ -6543,7 +6852,7 @@ function applyRelayProfilePatchToFiles(
     next.baseUrl = patch.upstreamBaseUrl || "";
   }
   if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch) {
-    const baseUrlForConfig = next.protocol === "chatCompletions" ? PROTOCOL_PROXY_BASE_URL : next.upstreamBaseUrl || next.baseUrl;
+    const baseUrlForConfig = next.protocol !== "responses" ? PROTOCOL_PROXY_BASE_URL : next.upstreamBaseUrl || next.baseUrl;
     next.configContents = setCodexProviderStringKey(next.configContents, "base_url", baseUrlForConfig);
     next.configContents = removeRootTomlKey(next.configContents, CHAT_UPSTREAM_BASE_URL_KEY);
   }
@@ -6896,9 +7205,13 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     contextSelectionInitialized: true,
     contextWindow: "",
     autoCompactLimit: "",
+    autoCompactEnabled: false,
+    autoCompactPercent: 80,
     modelList: "",
     modelWindows: "",
     userAgent: "",
+    customModels: [],
+    defaultCustomModelId: "",
   };
   return withGeneratedRelayFiles(next);
 }
@@ -6926,9 +7239,13 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       contextSelectionInitialized: true,
       contextWindow: "",
       autoCompactLimit: "",
+      autoCompactEnabled: false,
+      autoCompactPercent: 80,
       modelList: "",
       modelWindows: "",
       userAgent: "",
+      customModels: [],
+      defaultCustomModelId: "",
       aggregate: {
         strategy: "failover",
         members: candidates.slice(0, 1).map((profile) => ({ profileId: profile.id, weight: 1 })),
@@ -7080,7 +7397,100 @@ function aggregateMemberCandidates(settings: BackendSettings, aggregateId: strin
 }
 
 function isApiRelayProfile(profile: RelayProfile): boolean {
+  if (profile.relayMode === "customModels" || isAggregateRelayProfile(profile)) return false;
   return Boolean(profile.baseUrl.trim() && profile.apiKey.trim());
+}
+
+function isCustomModelsRelayProfile(profile: Pick<RelayProfile, "relayMode">): boolean {
+  return profile.relayMode === "customModels";
+}
+
+function createEmptyCustomModel(): CustomRelayModel {
+  return {
+    id: `model-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+    protocol: "responses",
+    contextWindow: "",
+    autoCompactEnabled: false,
+    autoCompactPercent: 80,
+  };
+}
+
+function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile {
+  const id = `custom-${Date.now().toString(36)}`;
+  const contextSelection = contextSelectionForAllEntries(settings);
+  const model = createEmptyCustomModel();
+  return {
+    id,
+    name: tf("自定义供应商 {0}", [settings.relayProfiles.filter(isCustomModelsRelayProfile).length + 1]),
+    model: "",
+    baseUrl: PROTOCOL_PROXY_BASE_URL,
+    upstreamBaseUrl: "",
+    apiKey: "codex-plus-custom",
+    protocol: "responses",
+    relayMode: "customModels",
+    officialMixApiKey: false,
+    testModel: "",
+    configContents: "",
+    authContents: "",
+    useCommonConfig: true,
+    contextSelection,
+    contextSelectionInitialized: true,
+    contextWindow: "",
+    autoCompactLimit: "",
+    autoCompactEnabled: false,
+    autoCompactPercent: 80,
+    modelList: "",
+    modelWindows: "",
+    userAgent: "",
+    customModels: [model],
+    defaultCustomModelId: model.id,
+    aggregate: null,
+  };
+}
+
+function autoCompactLimitFromPercent(contextWindow: string, percent: number): string {
+  const window = parseContextWindowTokens(contextWindow);
+  if (!window) return "";
+  const clamped = Math.min(100, Math.max(1, Math.round(percent || 80)));
+  const limit = Math.floor((window * clamped) / 100);
+  return String(Math.min(window, Math.max(1, limit)));
+}
+
+function parseContextWindowTokens(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = /^(\d+(?:\.\d+)?)([KkMm])?$/.exec(trimmed);
+  if (!match) return null;
+  const base = Number(match[1]);
+  if (!Number.isFinite(base) || base <= 0) return null;
+  const unit = match[2]?.toLowerCase();
+  const multiplier = unit === "k" ? 1000 : unit === "m" ? 1_000_000 : 1;
+  return Math.floor(base * multiplier);
+}
+
+function migrateLegacyAutoCompact(profile: RelayProfile): RelayProfile {
+  if (profile.autoCompactEnabled) {
+    if (profile.contextWindow) {
+      return {
+        ...profile,
+        autoCompactLimit: autoCompactLimitFromPercent(profile.contextWindow, profile.autoCompactPercent || 80),
+      };
+    }
+    return profile;
+  }
+  const window = parseContextWindowTokens(profile.contextWindow || "");
+  const limit = Number.parseInt(profile.autoCompactLimit || "", 10);
+  if (!window || !Number.isFinite(limit) || limit <= 0) return profile;
+  const percent = Math.round((limit * 100) / window);
+  if (percent < 1 || percent > 100) return profile;
+  return {
+    ...profile,
+    autoCompactEnabled: true,
+    autoCompactPercent: percent,
+  };
 }
 
 function clampAggregateWeight(value: number): number {

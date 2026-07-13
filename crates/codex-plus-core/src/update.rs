@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const DEFAULT_REPOSITORY: &str = "BigPizzaV3/CodexPlusPlus";
+pub const DEFAULT_REPOSITORY: &str = "ygzzfyh123/CodexPlusPlus";
 pub const DEFAULT_LATEST_JSON_URL: &str =
-    "https://github.com/BigPizzaV3/CodexPlusPlus/releases/latest/download/latest.json";
+    "https://github.com/ygzzfyh123/CodexPlusPlus/releases/latest/download/latest.json";
+pub const DEFAULT_RELEASES_PAGE_URL: &str = "https://github.com/ygzzfyh123/CodexPlusPlus/releases";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseAsset {

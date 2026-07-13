@@ -2337,53 +2337,42 @@
     if (!codexPlusAds.length) return `<div class="codex-plus-ad-empty">暂无推荐内容。</div>`;
     return `
       <section class="codex-plus-ad-section">
-        <h3 class="codex-plus-ad-section-title">赞助商推荐</h3>
-        <div class="codex-plus-ad-list">${renderCodexPlusAdGroup("sponsor", "暂无赞助商推荐。")}</div>
-      </section>
-      <section class="codex-plus-ad-section">
-        <h3 class="codex-plus-ad-section-title">普通推荐</h3>
-        <div class="codex-plus-ad-list">${renderCodexPlusAdGroup("normal", "暂无普通推荐。")}</div>
+        <h3 class="codex-plus-ad-section-title">推荐内容</h3>
+        <div class="codex-plus-ad-list">${codexPlusAds.map((ad) => `
+      <article class="codex-plus-ad-card">
+        ${ad.image ? `<img class="codex-plus-ad-image" src="${escapeHtml(ad.image)}" alt="">` : ""}
+        <div class="codex-plus-ad-content">
+          <h3 class="codex-plus-ad-title">${escapeHtml(ad.title)}</h3>
+          <p class="codex-plus-ad-description">${escapeHtml(ad.description)}</p>
+          <div class="codex-plus-ad-highlights">
+            ${ad.highlights.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+          <a class="codex-plus-ad-link" href="${escapeHtml(ad.url)}" target="_blank" rel="noreferrer">访问 ${escapeHtml(new URL(ad.url).hostname)}</a>
+        </div>
+      </article>
+    `).join("")}</div>
       </section>
     `;
   }
 
-  function cacheBustCodexPlusAdUrl(url, version) {
-    return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
-  }
-
-  async function directFetchCodexPlusAds() {
-    const urls = [
-      "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-      "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
-    ];
-    let lastError = null;
-    const cacheBust = Date.now();
-    for (const url of urls) {
-      try {
-        const response = await fetch(cacheBustCodexPlusAdUrl(url, cacheBust), {
-          headers: { "Accept": "application/json" },
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json();
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw lastError || new Error("ad list unavailable");
-  }
-
   async function fetchCodexPlusAds() {
     try {
-      const localPayload = await postJson(codexPlusAdsUrl, {});
-      codexPlusAds = normalizeCodexPlusAds(localPayload?.ads ? localPayload : localPayload?.payload);
-      if (!codexPlusAds.length) codexPlusAds = normalizeCodexPlusAds(await directFetchCodexPlusAds());
+      if (window.__CODEX_PLUS_LOCAL_ADS__ && Array.isArray(window.__CODEX_PLUS_LOCAL_ADS__.ads)) {
+        codexPlusAds = normalizeCodexPlusAds(window.__CODEX_PLUS_LOCAL_ADS__);
+      } else {
+        const localPayload = await postJson(codexPlusAdsUrl, {});
+        codexPlusAds = normalizeCodexPlusAds(localPayload?.ads ? localPayload : localPayload?.payload);
+      }
     } catch (error) {
       sendCodexPlusDiagnostic("ads_fetch_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
-      codexPlusAds = [];
+      if (window.__CODEX_PLUS_LOCAL_ADS__ && Array.isArray(window.__CODEX_PLUS_LOCAL_ADS__.ads)) {
+        codexPlusAds = normalizeCodexPlusAds(window.__CODEX_PLUS_LOCAL_ADS__);
+      } else {
+        codexPlusAds = [];
+      }
     } finally {
       codexPlusAdsLoaded = true;
       const panel = document.querySelector('[data-codex-plus-panel="sponsor"] .codex-plus-ad-remote');
@@ -2530,7 +2519,7 @@
               <button type="button" class="codex-plus-action-button" data-codex-open-devtools="true">打开 DevTools</button>
             </div>
             <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">关于 Codex++</div><div class="codex-plus-about">Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>GitHub: <a href="https://github.com/BigPizzaV3/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/CodexPlusPlus" target="_blank" rel="noreferrer">https://t.me/CodexPlusPlus</a></div></div>
+              <div><div class="codex-plus-row-title">关于 Codex++</div><div class="codex-plus-about">Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>GitHub: <a href="https://github.com/ygzzfyh123/CodexPlusPlus" target="_blank" rel="noreferrer">https://github.com/ygzzfyh123/CodexPlusPlus</a></div></div>
             </div>
             <div class="codex-plus-row">
               <div><div class="codex-plus-row-title">Discord 社区</div><div class="codex-plus-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>
@@ -2561,7 +2550,7 @@
             </div>
           </div>
           <div class="codex-plus-panel" data-codex-plus-panel="sponsor" hidden>
-            <div class="codex-plus-sponsor-text">推荐内容分为赞助商推荐和普通推荐。赞助商推荐来自支持 Codex++ 继续维护的合作方；普通推荐用于展示适合 Codex 用户的服务与信息。</div>
+            <div class="codex-plus-sponsor-text">本地推荐内容可在断网时完整显示图片、介绍和跳转按钮。</div>
             <div class="codex-plus-ad-remote">
               ${renderCodexPlusAds()}
             </div>
@@ -2622,16 +2611,16 @@
         return;
       }
       if (target?.closest("[data-codex-plus-discord]")) {
-        window.open("https://discord.gg/y96kX7A76v", "_blank");
+        window.open("", "_blank");
         return;
       }
       if (target?.closest("[data-codex-plus-telegram]")) {
-        window.open("https://t.me/CodexPlusPlus", "_blank");
+        window.open("", "_blank");
         return;
       }
       const issueButton = target?.closest("[data-codex-plus-issue]");
       if (issueButton) {
-        const issueUrl = "https://github.com/BigPizzaV3/CodexPlusPlus/issues";
+        const issueUrl = "https://github.com/ygzzfyh123/CodexPlusPlus/issues";
         window.open(issueUrl, "_blank");
         return;
       }

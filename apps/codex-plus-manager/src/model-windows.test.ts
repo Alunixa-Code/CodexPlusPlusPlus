@@ -29,9 +29,13 @@ const _profileTypeCheck: RelayProfile = {
   contextSelectionInitialized: true,
   contextWindow: "",
   autoCompactLimit: "",
+  autoCompactEnabled: false,
+  autoCompactPercent: 80,
   modelList: "",
   modelWindows: "",
   userAgent: "",
+  customModels: [],
+  defaultCustomModelId: "",
 };
 
 void _profileTypeCheck;

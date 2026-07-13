@@ -15,7 +15,7 @@ pub struct RelayEnvironmentReport {
 
 impl RelayEnvironmentReport {
     pub fn all_passed(&self) -> bool {
-        !self.clash_verge_tun.enabled
+        self.clash_verge_tun.enabled
             && self.proxy_environment.variables.is_empty()
             && !self.codex_env_file.exists
     }
@@ -284,5 +284,36 @@ mod tests {
             check.config_path,
             Some(config.to_string_lossy().to_string())
         );
+    }
+
+    #[test]
+    fn all_passed_requires_tun_enabled() {
+        let mut report = RelayEnvironmentReport {
+            clash_verge_tun: ClashVergeTunCheck {
+                enabled: true,
+                config_path: Some("cfg".to_string()),
+            },
+            proxy_environment: ProxyEnvironmentCheck {
+                variables: Vec::new(),
+            },
+            codex_env_file: CodexEnvFileCheck {
+                exists: false,
+                path: ".env".to_string(),
+            },
+        };
+        assert!(report.all_passed());
+
+        report.clash_verge_tun.enabled = false;
+        assert!(!report.all_passed());
+
+        report.clash_verge_tun.enabled = true;
+        report
+            .proxy_environment
+            .variables
+            .push(ProxyEnvironmentVariable {
+                name: "HTTPS_PROXY".to_string(),
+                source: ProxyEnvironmentSource::Process,
+            });
+        assert!(!report.all_passed());
     }
 }

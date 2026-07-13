@@ -50,7 +50,7 @@ fn injection_script_prefixes_helper_url_and_sponsor_images() {
     assert!(script.contains("window.__CODEX_PLUS_SPONSOR_IMAGES__"));
     assert!(script.contains("window.__CODEX_PLUS_VERSION__"));
     assert!(script.contains(codex_plus_core::version::VERSION));
-    assert!(script.contains("https://discord.gg/y96kX7A76v"));
+    assert!(!script.contains("https://discord.gg/y96kX7A76v"));
     assert!(script.contains("data-codex-plus-discord"));
 }
 
@@ -177,7 +177,8 @@ fn injection_script_fetches_ads_without_bridge() {
     assert!(script.contains("directFetchCodexPlusAds"));
     assert!(script.contains("cacheBustCodexPlusAdUrl"));
     assert!(script.contains("Date.now()"));
-    assert!(script.contains("BigPizzaV3/Ad-List"));
+    assert!(!script.contains("BigPizzaV3/Ad-List"));
+    assert!(script.contains("9527Code") || script.contains("__CODEX_PLUS_LOCAL_ADS__"));
     assert!(
         !script.contains("codexPlusAds = normalizeCodexPlusAds(await postJson(\"/ads\", {}));")
     );

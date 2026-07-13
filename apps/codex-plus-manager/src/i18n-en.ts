@@ -5,6 +5,15 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "开机时启动 Codex++ 管理器": "Start Codex++ Manager at login",
+  "写入当前用户开机启动项，登录后仅显示托盘。": "Writes the current-user Run key and starts tray-only after login.",
+  "当前平台不支持开机自启。": "Autostart is not supported on this platform.",
+  "启用自动压缩": "Enable auto-compaction",
+  "关闭时不写自动压缩阈值；开启后需要有效上下文窗口。": "When off, no compaction threshold is written; when on, a valid context window is required.",
+  "按模型独立配置 Base URL、Key 与协议": "Configure Base URL, key, and protocol per model",
+  "默认模型": "Default model",
+  "测试此模型": "Test this model",
+  "自定义模型路由": "Custom model routing",
   "API Key 模式下扩展插件市场请求，尽量显示完整插件列表；官方/混合模式通常不需要。":
     "Expands plugin marketplace requests in API Key mode to show the full plugin list. Usually unnecessary in official/mixed mode.",
   "API Key 环境变量": "API Key environment variable",
@@ -149,8 +158,7 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。":
     "When off, this tool won't write Codex's config.toml / auth.json on manual switches; it never auto-modifies these files when launching Codex.",
   "兼容增强": "Compatible enhancement",
-  "内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。":
-    "Content comes from BigPizzaV3/Ad-List, split into sponsor recommendations and regular recommendations.",
+  "本地内置推荐，断网也可完整显示": "Local recommendations work offline.",
   "内置": "Built-in",
   "内置、手动和市场安装脚本；可在这里启停或删除用户脚本": "Built-in, manual and marketplace-installed scripts; enable, disable or delete user scripts here",
   "内置和用户自定义脚本清单": "Built-in and user-defined script inventory",
@@ -179,7 +187,7 @@ export const EN_PLAIN: Record<string, string> = {
   "刷新列表": "Refresh list",
   "刷新市场": "Refresh marketplace",
   "刷新当前页面": "Refresh current page",
-  "刷新推荐": "Refresh recommendations",
+  "暂无推荐内容。": "No recommendations.",
   "刷新本地": "Refresh local",
   "刷新项目": "Refresh projects",
   "加入当前工作区": "Add to current workspace",
@@ -190,7 +198,7 @@ export const EN_PLAIN: Record<string, string> = {
   "历史会话修复": "Historical session repair",
   "历史会话修复失败，请查看错误提示后重试。": "Historical session repair failed. Check the error message and retry.",
   "历史会话修复进度": "Historical session repair progress",
-  "压缩上下文大小": "Compaction context size",
+  "自动压缩百分比": "Auto-compaction percent",
   "原生菜单栏位置": "Native menu bar placement",
   "原生菜单汉化": "Native menu localization",
   "反馈问题": "Report an issue",
@@ -489,6 +497,7 @@ export const EN_PLAIN: Record<string, string> = {
   "混入 API KEY": "Mix in API KEY",
   "混入 API Key": "Mix in API Key",
   "添加供应商": "Add provider",
+  "添加供应商(可自定义)": "Add provider (custom models)",
   "添加模型": "Add model",
   "添加聚合供应商": "Add aggregate provider",
   "清空选择": "Clear selection",
@@ -646,7 +655,7 @@ export const EN_PLAIN: Record<string, string> = {
   "进程环境": "Process environment",
   "系统环境": "System environment",
   "Clash Verge Rev TUN 模式": "Clash Verge Rev TUN mode",
-  "未发现 Clash Verge Rev 配置，按未开启处理。": "No Clash Verge Rev configuration was found; TUN is treated as disabled.",
+  "未发现 Clash Verge Rev 配置，按 TUN 未确认开启处理。": "No Clash Verge Rev configuration was found; TUN is treated as not confirmed enabled.",
   "等待检测。": "Waiting for check.",
   "系统代理环境变量": "System proxy environment variables",
   "未检测到 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY、NO_PROXY 或 FTP_PROXY。":
@@ -664,6 +673,9 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "将按上下文窗口的 {0}% 写入压缩阈值{1}": "Writes a compaction threshold at {0}% of the context window{1}",
+  "自定义供应商 {0}": "Custom provider {0}",
+  "模型 {0}": "Model {0}",
   "\n...以及另外 {0} 个会话": "\n...and {0} more session(s)",
   "{0}（{1}）": "{0} ({1})",
   "{0} ms": "{0} ms",
@@ -687,9 +699,8 @@ export const EN_TEMPLATE: Record<string, string> = {
     "Delete the {0} selected session(s)? This deletes the local database records and rollout files, and creates a backup for each session.\n\n{1}{2}",
   "发现 {0} 个 Codex 供应商": "Found {0} Codex provider(s)",
   "发现新版本 {0}": "New version {0} available",
-  "检测到 TUN 模式已开启，请在 Clash Verge Rev 中关闭。配置：{0}":
-    "TUN mode is enabled. Disable it in Clash Verge Rev. Configuration: {0}",
-  "TUN 模式已关闭。配置：{0}": "TUN mode is disabled. Configuration: {0}",
+  "检测到 TUN 模式已关闭，请在 Clash Verge Rev 中开启。配置：{0}": "TUN mode is disabled. Enable it in Clash Verge Rev. Configuration: {0}",
+  "TUN 模式已开启。配置：{0}": "TUN mode is enabled. Configuration: {0}",
   "检测到代理环境变量：{0}。请清理后重新启动 Codex++。":
     "Proxy environment variables detected: {0}. Remove them and restart Codex++.",
   "检测到可能干扰供应商配置的 .env 文件：{0}": "A .env file that may interfere with provider configuration was found: {0}",

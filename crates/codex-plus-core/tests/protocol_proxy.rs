@@ -1,12 +1,15 @@
 use codex_plus_core::protocol_proxy::{
-    ChatSseToResponsesConverter, chat_completion_to_response,
-    chat_completion_to_response_with_request, chat_completions_url, chat_sse_to_responses_sse,
-    chat_sse_to_responses_sse_with_request, is_chat_completions_proxy_path, is_models_proxy_path,
-    is_responses_proxy_path, models_url, open_chat_completions_proxy_request,
-    open_models_proxy_request, open_responses_proxy_request,
-    open_responses_proxy_request_with_settings, responses_error_from_upstream,
-    responses_to_chat_completions, send_upstream_request_with_header_timeout,
-    upstream_header_timeout, upstream_http_client, upstream_stream_header_timeout,
+    ChatSseToResponsesConverter, NativeSseToResponsesConverter, UpstreamWireApi,
+    anthropic_messages_url, chat_completion_to_response, chat_completion_to_response_with_request,
+    chat_completions_url, chat_sse_to_responses_sse, chat_sse_to_responses_sse_with_request,
+    completions_url, gemini_generate_content_to_response_with_request, gemini_generate_content_url,
+    is_chat_completions_proxy_path, is_models_proxy_path, is_responses_proxy_path, models_url,
+    normalize_models_payload, open_chat_completions_proxy_request, open_models_proxy_request,
+    open_responses_proxy_request, open_responses_proxy_request_with_settings,
+    responses_error_from_upstream, responses_to_anthropic_messages, responses_to_chat_completions,
+    responses_to_completions, responses_to_gemini_generate_content,
+    send_upstream_request_with_header_timeout, upstream_header_timeout, upstream_http_client,
+    upstream_stream_header_timeout,
 };
 use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
@@ -72,6 +75,143 @@ fn responses_request_converts_to_chat_completions() {
                 }
             ]
         })
+    );
+}
+
+#[test]
+fn responses_request_converts_to_all_supported_upstream_protocols() {
+    let request = json!({
+        "model": "claude-sonnet-4-5",
+        "instructions": "Be concise.",
+        "input": "hello",
+        "max_output_tokens": 64,
+        "stream": true,
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "description": "Lookup data",
+            "parameters": {
+                "type": "object",
+                "properties": { "query": { "type": "string" } },
+                "required": ["query"]
+            }
+        }]
+    });
+
+    let completions = responses_to_completions(request.clone()).unwrap();
+    assert!(
+        completions["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("user: hello")
+    );
+    assert_eq!(completions["stream"], true);
+
+    let anthropic = responses_to_anthropic_messages(request.clone()).unwrap();
+    assert_eq!(anthropic["system"], "Be concise.");
+    assert_eq!(anthropic["messages"][0]["role"], "user");
+    assert_eq!(anthropic["tools"][0]["name"], "lookup");
+    assert_eq!(anthropic["max_tokens"], 64);
+
+    let gemini = responses_to_gemini_generate_content(request).unwrap();
+    assert_eq!(
+        gemini["systemInstruction"]["parts"][0]["text"],
+        "Be concise."
+    );
+    assert_eq!(gemini["contents"][0]["role"], "user");
+    assert_eq!(
+        gemini["tools"][0]["functionDeclarations"][0]["name"],
+        "lookup"
+    );
+    assert_eq!(gemini["generationConfig"]["maxOutputTokens"], 64);
+}
+
+#[test]
+fn gemini_tool_thought_signature_is_preserved_for_followup() {
+    let original_request = json!({
+        "model": "gemini-3-pro",
+        "input": "inspect",
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "parameters": { "type": "object" }
+        }]
+    });
+    let response = gemini_generate_content_to_response_with_request(
+        json!({
+            "responseId": "gemini_sig",
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [{
+                        "functionCall": {
+                            "name": "lookup",
+                            "args": { "query": "rust" }
+                        },
+                        "thoughtSignature": "signature-test"
+                    }]
+                },
+                "finishReason": "STOP"
+            }]
+        }),
+        &original_request,
+    )
+    .unwrap();
+    let call_id = response["output"][0]["call_id"].as_str().unwrap();
+
+    let followup = responses_to_gemini_generate_content(json!({
+        "model": "gemini-3-pro",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": "lookup",
+                "arguments": "{\"query\":\"rust\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": "found"
+            }
+        ]
+    }))
+    .unwrap();
+
+    assert_eq!(
+        followup["contents"][0]["parts"][0]["thoughtSignature"],
+        "signature-test"
+    );
+}
+
+#[test]
+fn native_endpoint_urls_accept_origins_versions_and_exact_paths() {
+    assert_eq!(
+        completions_url("https://api.example.test"),
+        "https://api.example.test/v1/completions"
+    );
+    assert_eq!(
+        anthropic_messages_url("https://api.anthropic.com"),
+        "https://api.anthropic.com/v1/messages"
+    );
+    assert_eq!(
+        anthropic_messages_url("https://api.example.test/v1/messages"),
+        "https://api.example.test/v1/messages"
+    );
+    assert_eq!(
+        gemini_generate_content_url(
+            "https://generativelanguage.googleapis.com/v1",
+            "gemini-2.5-pro",
+            false
+        ),
+        "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent"
+    );
+    assert_eq!(
+        gemini_generate_content_url(
+            "https://generativelanguage.googleapis.com/v1/models/{model_id}:generateContent",
+            "gemini-2.5-flash",
+            true
+        ),
+        "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
     );
 }
 
@@ -1236,6 +1376,89 @@ fn chat_sse_converter_handles_partial_chunks_and_utf8_boundaries() {
 }
 
 #[test]
+fn chat_stream_finishes_on_finish_reason_without_done_marker() {
+    let mut converter = ChatSseToResponsesConverter::default();
+    let output = converter.push_bytes(
+        br#"data: {"id":"chatcmpl_terminal","model":"grok-4","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}
+
+"#,
+    );
+    let output = String::from_utf8(output).unwrap();
+
+    assert!(converter.is_completed());
+    assert!(output.contains("\"delta\":\"done\""));
+    assert!(output.contains("event: response.completed"));
+    assert!(output.contains("data: [DONE]"));
+}
+
+#[test]
+fn anthropic_stream_finishes_on_message_stop_without_waiting_for_eof() {
+    let request = json!({
+        "model": "claude-sonnet-4-5",
+        "input": "hello",
+        "stream": true
+    });
+    let mut converter =
+        NativeSseToResponsesConverter::with_request(UpstreamWireApi::AnthropicMessages, &request);
+    let output = converter.push_bytes(
+        br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-5","usage":{"input_tokens":4,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Check first. "}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#,
+    );
+    let output = String::from_utf8(output).unwrap();
+
+    assert!(converter.is_completed());
+    assert!(output.contains("Check first. "));
+    assert!(output.contains("\"delta\":\"Done\""));
+    assert!(output.contains("event: response.completed"));
+    assert!(output.contains("data: [DONE]"));
+}
+
+#[test]
+fn gemini_stream_finishes_on_finish_reason_without_waiting_for_eof() {
+    let request = json!({
+        "model": "gemini-2.5-pro",
+        "input": "hello",
+        "stream": true
+    });
+    let mut converter = NativeSseToResponsesConverter::with_request(
+        UpstreamWireApi::GeminiGenerateContent,
+        &request,
+    );
+    let output = converter.push_bytes(
+        br#"data: {"responseId":"gemini_1","candidates":[{"content":{"role":"model","parts":[{"text":"Need context.","thought":true},{"text":"Answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"thoughtsTokenCount":1,"totalTokenCount":6}}
+
+"#,
+    );
+    let output = String::from_utf8(output).unwrap();
+
+    assert!(converter.is_completed());
+    assert!(output.contains("Need context."));
+    assert!(output.contains("\"delta\":\"Answer\""));
+    assert!(output.contains("event: response.completed"));
+    assert!(output.contains("data: [DONE]"));
+}
+
+#[test]
 fn chat_completions_url_normalizes_common_base_urls() {
     assert_eq!(
         chat_completions_url("https://api.example.test"),
@@ -1297,6 +1520,35 @@ fn models_url_normalizes_common_base_urls() {
         models_url("https://api.example.test/openai#"),
         "https://api.example.test/openai/models"
     );
+    assert_eq!(
+        models_url("https://api.anthropic.com/v1/messages"),
+        "https://api.anthropic.com/v1/models"
+    );
+    assert_eq!(
+        models_url(
+            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent"
+        ),
+        "https://generativelanguage.googleapis.com/v1/models"
+    );
+}
+
+#[test]
+fn native_model_lists_are_normalized_for_codex() {
+    let anthropic = normalize_models_payload(&json!({
+        "data": [
+            { "id": "claude-sonnet-4-5", "type": "model" }
+        ]
+    }));
+    assert_eq!(anthropic["data"][0]["id"], "claude-sonnet-4-5");
+
+    let gemini = normalize_models_payload(&json!({
+        "models": [
+            { "name": "models/gemini-2.5-pro" },
+            { "name": "models/gemini-2.5-flash" }
+        ]
+    }));
+    assert_eq!(gemini["data"][0]["id"], "gemini-2.5-pro");
+    assert_eq!(gemini["data"][1]["id"], "gemini-2.5-flash");
 }
 
 #[test]
