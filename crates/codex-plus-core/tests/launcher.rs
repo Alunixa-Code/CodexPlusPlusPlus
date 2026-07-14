@@ -19,7 +19,8 @@ use codex_plus_core::launcher::{
 #[cfg(windows)]
 use codex_plus_core::launcher::{WindowsProcessControlStrategy, windows_process_control_strategy};
 use codex_plus_core::ports::{
-    select_packaged_codex_debug_port_with, select_platform_loopback_port_with,
+    is_existing_codex_cdp_port, select_packaged_codex_debug_port_with,
+    select_platform_loopback_port_with,
 };
 use codex_plus_core::settings::{BackendSettings, RelayMode, RelayProfile, RelayProtocol};
 use codex_plus_core::status::StatusStore;
@@ -695,9 +696,43 @@ fn ports_windows_falls_back_to_ephemeral_when_requested_is_busy() {
 
 #[test]
 fn ports_windows_packaged_debug_falls_back_to_ephemeral_when_requested_is_busy() {
-    let selected = select_packaged_codex_debug_port_with(9229, true, |_| false, || 43001);
+    let selected =
+        select_packaged_codex_debug_port_with(9229, true, |_| false, |_| false, || 43001);
 
     assert_eq!(selected, 43001);
+}
+
+#[test]
+fn ports_windows_packaged_debug_reuses_existing_codex_cdp() {
+    let selected = select_packaged_codex_debug_port_with(9229, true, |_| false, |_| true, || 43001);
+
+    assert_eq!(selected, 9229);
+}
+
+#[test]
+fn ports_detects_existing_codex_cdp_page() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = stream.read(&mut request).unwrap();
+        let body = r#"[{"id":"page-1","type":"page","title":"Codex","url":"app://-/index.html","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/page-1"}]"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+        stream.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    });
+
+    assert!(is_existing_codex_cdp_port(port));
+    server.join().unwrap();
 }
 
 #[test]

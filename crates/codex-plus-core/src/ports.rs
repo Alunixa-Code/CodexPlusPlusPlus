@@ -1,6 +1,8 @@
 use std::fs::File;
-use std::net::{TcpListener, ToSocketAddrs};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use fs2::FileExt;
 
@@ -77,6 +79,7 @@ pub fn select_packaged_codex_debug_port(requested: u16) -> u16 {
         requested,
         cfg!(windows),
         can_bind_loopback_port,
+        is_existing_codex_cdp_port,
         find_available_loopback_port,
     )
 }
@@ -85,9 +88,14 @@ pub fn select_packaged_codex_debug_port_with(
     requested: u16,
     is_windows: bool,
     can_bind: impl Fn(u16) -> bool,
+    is_existing_codex_cdp: impl Fn(u16) -> bool,
     find_available: impl Fn() -> u16,
 ) -> u16 {
-    select_platform_loopback_port_with(requested, is_windows, can_bind, find_available)
+    if !is_windows || can_bind(requested) || is_existing_codex_cdp(requested) {
+        requested
+    } else {
+        find_available()
+    }
 }
 
 pub fn select_platform_loopback_port_with(
@@ -127,6 +135,43 @@ pub fn can_connect_loopback_port(port: u16) -> bool {
                 .ok()
         })
         .is_some()
+}
+
+pub fn is_existing_codex_cdp_port(port: u16) -> bool {
+    if port == 0 {
+        return false;
+    }
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let timeout = Duration::from_millis(350);
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    let request =
+        format!("GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut response = Vec::new();
+    if stream.take(1024 * 1024).read_to_end(&mut response).is_err() && response.is_empty() {
+        return false;
+    }
+    let Some(body_offset) = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|offset| offset + 4)
+    else {
+        return false;
+    };
+    let headers = &response[..body_offset];
+    if !headers.starts_with(b"HTTP/1.1 200") && !headers.starts_with(b"HTTP/1.0 200") {
+        return false;
+    }
+    serde_json::from_slice::<Vec<crate::cdp::CdpTarget>>(&response[body_offset..])
+        .ok()
+        .is_some_and(|targets| crate::cdp::pick_injectable_codex_page_target(&targets).is_ok())
 }
 
 pub fn acquire_loopback_port_guard(port: u16) -> std::io::Result<TcpListener> {
