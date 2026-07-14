@@ -42,6 +42,7 @@ pub mod version;
 pub mod watcher;
 #[cfg(windows)]
 mod windows_integration;
+mod workspace_performance;
 pub mod zed_remote;
 
 #[cfg(windows)]

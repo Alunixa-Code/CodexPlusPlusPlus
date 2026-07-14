@@ -443,14 +443,6 @@ where
     ) -> anyhow::Result<()> {
         let expression = resolve_bridge_expression(request_id, result)?;
         let message_id = next_message_id();
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "bridge.resolve_start",
-            json!({
-                "request_id": request_id,
-                "message_id": message_id,
-                "result_status": result.get("status").and_then(Value::as_str).unwrap_or("")
-            }),
-        );
         let sent = self
             .send_command_without_wait(
                 message_id,
@@ -458,26 +450,15 @@ where
                 runtime_evaluate_params(&expression),
             )
             .await;
-        match &sent {
-            Ok(_) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "bridge.resolve_ok",
-                    json!({
-                        "request_id": request_id,
-                        "message_id": message_id
-                    }),
-                );
-            }
-            Err(error) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "bridge.resolve_failed",
-                    json!({
-                        "request_id": request_id,
-                        "message_id": message_id,
-                        "message": error.to_string()
-                    }),
-                );
-            }
+        if let Err(error) = &sent {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "bridge.resolve_failed",
+                json!({
+                    "request_id": request_id,
+                    "message_id": message_id,
+                    "message": error.to_string()
+                }),
+            );
         }
         sent.map(|_| ())
     }

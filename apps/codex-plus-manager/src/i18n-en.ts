@@ -337,6 +337,7 @@ export const EN_PLAIN: Record<string, string> = {
   "快捷方式修复": "Shortcut repair",
   "快捷方式写入系统实际桌面位置，不使用写死桌面路径": "Shortcuts are written to the system's actual desktop location, not a hardcoded desktop path",
   "快速启动": "Fast startup",
+  "性能保护": "Performance protection",
   "总权重": "Total weight",
   "成员供应商": "Member providers",
   "成员数量": "Member count",
@@ -644,6 +645,8 @@ export const EN_PLAIN: Record<string, string> = {
     "The model name used by default when launching Codex; don't include a suffix. Configure context windows per model in the “Model list” below.",
   "默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。":
     "Off by default; enable it without a VPN to let Statsig initialization fail fast and reduce launch time. Requires restarting Codex.",
+  "减少后台 CDP、日志和页面扫描，在大对话切换时降低渲染压力，并清理会触发全盘 Git 探测的过宽历史工作区。":
+    "Reduces background CDP, logging, and page scans, lowers rendering pressure when switching large threads, and removes overly broad history roots that trigger wide Git scans.",
   "默认打开策略": "Default open strategy",
   "（": " (",
   "）": ")",

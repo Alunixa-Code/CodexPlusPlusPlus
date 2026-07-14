@@ -261,6 +261,23 @@ where
         if settings.provider_sync_enabled {
             hooks.run_provider_sync().await?;
         }
+        if settings.codex_app_performance_protection {
+            match crate::workspace_performance::prune_broad_saved_workspace_roots() {
+                Ok(result) if !result.removed.is_empty() => {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.performance_workspace_roots_pruned",
+                        serde_json::json!({ "removed": result.removed }),
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.performance_workspace_prune_failed",
+                        serde_json::json!({ "message": error.to_string() }),
+                    );
+                }
+            }
+        }
         if settings.relay_profiles_enabled
             && settings.active_relay_profile().relay_mode == RelayMode::CustomModels
         {
@@ -781,7 +798,10 @@ impl LaunchHooks for DefaultLaunchHooks {
         let task = tokio::spawn(async move {
             #[cfg(windows)]
             let pet_cursor_task = tokio::spawn(run_pet_real_mouse_cursor_driver(debug_port));
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(30),
+            );
             loop {
                 tokio::select! {
                     _ = &mut shutdown_rx => break,
@@ -959,16 +979,19 @@ async fn handle_helper_connection(
     let request_user_agent = header_value_from_request(&request, "user-agent");
     let remote_addr_text = remote_addr.map(|addr| addr.to_string());
 
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        "helper.request",
-        serde_json::json!({
-            "method": method,
-            "path": path,
-            "request_line": request_line,
-            "remote_addr": remote_addr_text,
-            "body_bytes": request_body.len()
-        }),
-    );
+    let quiet_status_request = path == "/backend/status";
+    if !quiet_status_request {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "helper.request",
+            serde_json::json!({
+                "method": method,
+                "path": path,
+                "request_line": request_line,
+                "remote_addr": remote_addr_text,
+                "body_bytes": request_body.len()
+            }),
+        );
+    }
 
     if crate::protocol_proxy::is_responses_proxy_path(path) && method == "POST" {
         return handle_protocol_proxy_connection(
@@ -1065,15 +1088,17 @@ async fn handle_helper_connection(
             "helper.unknown_path",
         )
     };
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        log_event,
-        serde_json::json!({
-            "method": method,
-            "path": path,
-            "status": status,
-            "remote_addr": remote_addr_text
-        }),
-    );
+    if !quiet_status_request {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            log_event,
+            serde_json::json!({
+                "method": method,
+                "path": path,
+                "status": status,
+                "remote_addr": remote_addr_text
+            }),
+        );
+    }
     let response = if method == "OPTIONS" {
         format!(
             "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -1986,6 +2011,9 @@ async fn pet_overlay_supports_v2_cursor(websocket_url: &str) -> bool {
 async fn sync_pet_real_mouse_overlay(debug_port: u16, _helper_port: u16) -> anyhow::Result<()> {
     let settings = SettingsStore::default().load().unwrap_or_default();
     let enabled = settings.enhancements_enabled && settings.codex_app_pet_real_mouse_look;
+    if !enabled {
+        return Ok(());
+    }
     let targets = crate::cdp::list_targets(debug_port).await?;
     for target in targets
         .iter()
@@ -2017,7 +2045,7 @@ async fn run_pet_real_mouse_cursor_driver(debug_port: u16) {
     loop {
         let settings = SettingsStore::default().load().unwrap_or_default();
         if !settings.enhancements_enabled || !settings.codex_app_pet_real_mouse_look {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             continue;
         }
 

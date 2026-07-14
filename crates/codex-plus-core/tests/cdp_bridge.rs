@@ -176,11 +176,11 @@ fn injection_script_marks_diagnostic_build_and_reports_script_loaded() {
 }
 
 #[test]
-fn injection_script_fetches_ads_without_bridge() {
+fn injection_script_prefers_embedded_local_ads() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("directFetchCodexPlusAds"));
-    assert!(script.contains("cacheBustCodexPlusAdUrl"));
+    assert!(script.contains("window.__CODEX_PLUS_LOCAL_ADS__"));
+    assert!(script.contains("normalizeCodexPlusAds(window.__CODEX_PLUS_LOCAL_ADS__)"));
     assert!(script.contains("Date.now()"));
     assert!(!script.contains("BigPizzaV3/Ad-List"));
     assert!(script.contains("9527Code") || script.contains("__CODEX_PLUS_LOCAL_ADS__"));
@@ -1443,9 +1443,7 @@ async fn install_bridge_routes_binding_while_waiting_for_command_response() {
         .await
         .expect("server task should finish without panicking");
     assert!(handled.load(Ordering::SeqCst));
-    let contents = std::fs::read_to_string(&log_path).unwrap();
-    assert!(contents.contains("bridge.resolve_start"));
-    assert!(contents.contains("bridge.resolve_ok"));
+    assert!(!log_path.exists());
     codex_plus_core::diagnostic_log::set_diagnostic_log_path_for_tests(None);
 }
 

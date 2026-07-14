@@ -1151,12 +1151,26 @@
       .codex-plus-sponsor-card { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.04); text-align: center; }
       .codex-plus-sponsor-card-title { color: #f3f4f6; font-size: 13px; margin-bottom: 8px; }
       .codex-plus-sponsor-qr { display: block; width: 100%; max-width: 340px; border-radius: 8px; margin: 0 auto; background: white; }
+      html.codex-plus-performance-protection [data-testid="conversation-turn"] {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 320px;
+      }
+      html.codex-plus-performance-protection.codex-plus-thread-switching main *,
+      html.codex-plus-performance-protection.codex-plus-thread-switching .thread-scroll-container * {
+        animation-duration: .001ms !important;
+        animation-delay: 0s !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+      }
+      html.codex-plus-performance-protection img[data-codex-plus-image-quarantined="true"] {
+        display: none !important;
+      }
     `;
     document.documentElement.appendChild(style);
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginMarketplaceUnlock: true, pluginAutoExpand: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, pasteFix: false, projectMove: true, threadIdBadge: false, conversationView: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, zedRemoteOpen: true, upstreamWorktreeCreate: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false };
+    return { pluginMarketplaceUnlock: true, pluginAutoExpand: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, pasteFix: false, performanceProtection: true, projectMove: true, threadIdBadge: false, conversationView: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, zedRemoteOpen: true, upstreamWorktreeCreate: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false };
   }
 
   const codexPlusBackendSettingMap = {
@@ -1176,6 +1190,7 @@
     petRealMouseLook: "codexAppPetRealMouseLook",
     stepwise: "codexAppStepwiseEnabled",
     pasteFix: "codexAppPasteFix",
+    performanceProtection: "codexAppPerformanceProtection",
   };
   const codexPlusBackendMappedSettings = new Set(Object.keys(codexPlusBackendSettingMap));
 
@@ -1199,6 +1214,7 @@
         sessionDelete: false,
         markdownExport: false,
         pasteFix: false,
+        performanceProtection: false,
         projectMove: false,
         threadIdBadge: false,
         conversationView: false,
@@ -1227,6 +1243,81 @@
       }
       return settings;
     }
+  }
+
+  const codexPerformanceImageFailures = new Map();
+
+  function codexPerformanceTransitionActive() {
+    return codexPlusSettings().performanceProtection &&
+      Number(window.__codexPlusPerformanceTransitionUntil || 0) > Date.now();
+  }
+
+  function beginCodexPerformanceTransition() {
+    if (!codexPlusSettings().performanceProtection) return;
+    window.__codexPlusPerformanceTransitionUntil = Date.now() + 1400;
+    document.documentElement.classList.add("codex-plus-thread-switching");
+    clearTimeout(window.__codexPlusPerformanceTransitionTimer);
+    window.__codexPlusPerformanceTransitionTimer = setTimeout(() => {
+      document.documentElement.classList.remove("codex-plus-thread-switching");
+      window.__codexPlusPerformanceTransitionUntil = 0;
+    }, 1400);
+  }
+
+  function codexPerformanceImageKey(image) {
+    const source = String(image?.currentSrc || image?.src || "");
+    if (!source || source.startsWith("data:") || source.startsWith("blob:") || source.startsWith(helperBase)) return "";
+    return source.slice(0, 2048);
+  }
+
+  function recordCodexPerformanceImageFailure(event) {
+    if (!codexPlusSettings().performanceProtection) return;
+    const image = event?.target;
+    if (!(image instanceof HTMLImageElement) || isExtensionUiNode(image)) return;
+    const key = codexPerformanceImageKey(image);
+    if (!key) return;
+    const now = Date.now();
+    const previous = codexPerformanceImageFailures.get(key);
+    const count = previous && now - previous.at < 60000 ? previous.count + 1 : 1;
+    codexPerformanceImageFailures.set(key, { count, at: now });
+    if (codexPerformanceImageFailures.size > 256) {
+      const oldest = codexPerformanceImageFailures.keys().next().value;
+      if (oldest) codexPerformanceImageFailures.delete(oldest);
+    }
+    image.loading = "lazy";
+    image.decoding = "async";
+    if (count < 3) return;
+    image.dataset.codexPlusImageQuarantined = "true";
+    image.removeAttribute("srcset");
+    image.removeAttribute("sizes");
+    image.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+  }
+
+  function clearCodexPerformanceImageFailure(event) {
+    const image = event?.target;
+    const key = codexPerformanceImageKey(image);
+    if (key) codexPerformanceImageFailures.delete(key);
+  }
+
+  function refreshCodexPerformanceProtection() {
+    const enabled = !!codexPlusSettings().performanceProtection;
+    document.documentElement.classList.toggle("codex-plus-performance-protection", enabled);
+    if (!enabled) {
+      document.documentElement.classList.remove("codex-plus-thread-switching");
+      window.__codexPlusPerformanceTransitionUntil = 0;
+    }
+  }
+
+  function installCodexPerformanceProtection() {
+    refreshCodexPerformanceProtection();
+    if (window.__codexPlusPerformanceProtectionInstalled) return;
+    window.__codexPlusPerformanceProtectionInstalled = true;
+    document.addEventListener("error", recordCodexPerformanceImageFailure, true);
+    document.addEventListener("load", clearCodexPerformanceImageFailure, true);
+    document.addEventListener("click", (event) => {
+      if (event.target?.closest?.(selectors.sidebarThread)) beginCodexPerformanceTransition();
+    }, true);
+    window.addEventListener("popstate", beginCodexPerformanceTransition);
+    window.addEventListener("hashchange", beginCodexPerformanceTransition);
   }
 
   function setCodexPlusSetting(key, value) {
@@ -2081,6 +2172,7 @@
   }
 
   function installCodexServiceTierDispatcherPatch() {
+    if (!codexPlusSettings().serviceTierControls) return;
     if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
     const patch = async () => {
       try {
@@ -2164,6 +2256,7 @@
       button.dataset.enabled = String(!!codexPlusBackendSettings[key]);
     });
     syncStepwisePanel();
+    refreshCodexPerformanceProtection();
     renderCodexPlusMenu();
     scan();
   }
@@ -2249,7 +2342,9 @@
 
   function scheduleBackendHeartbeat() {
     if (window.__codexPlusBackendHeartbeat) return;
-    window.__codexPlusBackendHeartbeat = setInterval(checkBackendStatus, 5000);
+    window.__codexPlusBackendHeartbeat = setInterval(() => {
+      if (document.visibilityState === "visible") checkBackendStatus();
+    }, 30000);
     checkBackendStatus();
   }
 
@@ -3172,8 +3267,10 @@
   }
 
   function pluginAutoExpandPageLooksRelevant() {
-    const text = String(document.body?.innerText || "");
-    return /插件|Plugins?|Marketplace|市场/i.test(text) && !!document.querySelector('button, [role="button"]');
+    const route = `${location.pathname || ""}${location.hash || ""}${location.search || ""}`;
+    if (/plugins?|marketplace/i.test(route)) return true;
+    const labels = Array.from(document.querySelectorAll("h1, h2, h3, [role='heading'], [role='tab'], nav a, nav button")).slice(0, 160);
+    return labels.some((node) => /插件|Plugins?|Marketplace|市场/i.test(String(node.textContent || "").slice(0, 240)));
   }
 
   function pluginAutoExpandButtonLooksScoped(button) {
@@ -3223,6 +3320,7 @@
 
   function schedulePluginAutoExpand(force = false) {
     if (!codexPlusSettings().pluginAutoExpand) return;
+    if (!force && !pluginAutoExpandPageLooksRelevant()) return;
     if (window.__codexPluginAutoExpandRunning && !force) return;
     clearTimeout(window.__codexPluginAutoExpandTimer);
     window.__codexPluginAutoExpandTimer = setTimeout(() => runPluginAutoExpand(force), force ? 30 : 180);
@@ -3231,6 +3329,7 @@
   function runPluginAutoExpand(force = false) {
     if (!codexPlusSettings().pluginAutoExpand) return;
     const currentSignature = pluginAutoExpandSignature();
+    if (!force && !currentSignature) return;
     if (!force && currentSignature && currentSignature === window.__codexPluginAutoExpandLastSignature) return;
     window.__codexPluginAutoExpandLastSignature = currentSignature;
     window.__codexPluginAutoExpandRunning = true;
@@ -3243,11 +3342,13 @@
       const button = pluginAutoExpandButtonCandidates()[0];
       if (!button || window.__codexPluginAutoExpandClicks >= codexPluginAutoExpandMaxClicks) {
         window.__codexPluginAutoExpandRunning = false;
-        sendCodexPlusDiagnostic("plugin_auto_expand_finished", {
-          version: codexPluginAutoExpandVersion,
-          clicks: window.__codexPluginAutoExpandClicks || 0,
-          exhausted: !!button,
-        });
+        if ((window.__codexPluginAutoExpandClicks || 0) > 0 || button) {
+          sendCodexPlusDiagnostic("plugin_auto_expand_finished", {
+            version: codexPluginAutoExpandVersion,
+            clicks: window.__codexPluginAutoExpandClicks || 0,
+            exhausted: !!button,
+          });
+        }
         return;
       }
       window.__codexPluginAutoExpandClicks = (window.__codexPluginAutoExpandClicks || 0) + 1;
@@ -5921,8 +6022,6 @@
       applyChatsSortCorrection().catch((error) => {
         window.__codexProjectMoveSortFailures = window.__codexProjectMoveSortFailures || [];
         window.__codexProjectMoveSortFailures.push(String(error?.stack || error));
-      }).finally(() => {
-        if (codexPlusSettings().projectMove) scheduleChatsSortCorrection();
       });
     }, delay);
   }
@@ -8108,6 +8207,7 @@
 
   function scanLightweight() {
     installStyle();
+    installCodexPerformanceProtection();
     installCodexServiceTierDispatcherPatch();
     installCodexPlusMenu();
     localizeCodexMenus();
@@ -8755,7 +8855,12 @@
 
   function scan() {
     runScanStep(scanLightweight);
-    requestAnimationFrame(() => runScanStep(scanDeferred));
+    const runDeferred = () => runScanStep(scanDeferred);
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(runDeferred, { timeout: 500 });
+    } else {
+      requestAnimationFrame(runDeferred);
+    }
   }
 
   function isExtensionUiNode(node) {
@@ -8827,10 +8932,11 @@
     window.__codexSessionDeleteLastMutations = mutations;
     scheduleZedRemoteMenuRefresh(mutations);
     schedulePluginAutoExpand();
-    if (!shouldScheduleScan(mutations)) return;
+    const switching = codexPerformanceTransitionActive();
+    if (!switching && !shouldScheduleScan(mutations)) return;
     if (window.__codexSessionDeleteScanPending) return;
     window.__codexSessionDeleteScanPending = true;
-    window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, 200);
+    window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, switching ? 450 : 200);
   }
 
   void loadBackendSettingsForStartup();

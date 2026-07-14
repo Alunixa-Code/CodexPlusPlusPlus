@@ -117,16 +117,19 @@ pub async fn handle_bridge_request(
     payload: Value,
 ) -> serde_json::Value {
     let started = Instant::now();
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        "bridge.request",
-        json!({
-            "path": path,
-            "payload_keys": payload
-                .as_object()
-                .map(|object| object.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default()
-        }),
-    );
+    let quiet_status_request = path == "/backend/status";
+    if !quiet_status_request {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "bridge.request",
+            json!({
+                "path": path,
+                "payload_keys": payload
+                    .as_object()
+                    .map(|object| object.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            }),
+        );
+    }
     let result = match path {
         "/settings/get" => settings_value(&ctx, ctx.settings.get_settings().await).await,
         "/settings/set" => {
@@ -264,14 +267,16 @@ pub async fn handle_bridge_request(
     };
 
     let response = result.unwrap_or_else(|error| failed_from_error(&payload, error));
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        "bridge.response",
-        json!({
-            "path": path,
-            "elapsed_ms": started.elapsed().as_millis() as u64,
-            "status": response.get("status").and_then(Value::as_str).unwrap_or("")
-        }),
-    );
+    if !quiet_status_request {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "bridge.response",
+            json!({
+                "path": path,
+                "elapsed_ms": started.elapsed().as_millis() as u64,
+                "status": response.get("status").and_then(Value::as_str).unwrap_or("")
+            }),
+        );
+    }
     response
 }
 
@@ -453,13 +458,6 @@ impl BridgeRuntimeService for CoreRuntimeService {
 
     async fn backend_status(&self) -> anyhow::Result<Value> {
         let _ = self.status_store.load_latest();
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "bridge.backend_status_ok",
-            json!({
-                "debug_port": self.debug_port,
-                "version": crate::version::VERSION
-            }),
-        );
         Ok(json!({"status": "ok", "message": "后端已连接", "version": crate::version::VERSION}))
     }
 

@@ -7,6 +7,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 static TEST_LOG_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+static LOG_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 struct DiagnosticRecord {
@@ -17,10 +19,15 @@ struct DiagnosticRecord {
 }
 
 pub fn append_diagnostic_log(event: &str, detail: impl Serialize) -> std::io::Result<()> {
+    let _guard = LOG_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = diagnostic_log_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    rotate_log_if_needed(&path)?;
 
     let detail = serde_json::to_value(detail).unwrap_or_else(|error| {
         json!({
@@ -51,6 +58,22 @@ pub fn append_diagnostic_log(event: &str, detail: impl Serialize) -> std::io::Re
         .open(path)?;
     writeln!(file, "{line}")?;
     Ok(())
+}
+
+fn rotate_log_if_needed(path: &PathBuf) -> std::io::Result<()> {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Ok(());
+    };
+    if metadata.len() < MAX_LOG_BYTES {
+        return Ok(());
+    }
+    let rotated = path.with_extension("log.1");
+    match std::fs::remove_file(&rotated) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::rename(path, rotated)
 }
 
 pub fn diagnostic_log_path() -> PathBuf {
