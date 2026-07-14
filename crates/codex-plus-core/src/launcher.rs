@@ -542,7 +542,7 @@ impl LaunchHooks for DefaultLaunchHooks {
             )?;
             return Ok(());
         }
-        crate::relay_config::apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
+        crate::relay_config::apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard(
             &home,
             &profile,
             &common_config,
@@ -1975,7 +1975,7 @@ async fn confirmed_pet_overlay_targets(
 async fn pet_overlay_supports_v2_cursor(websocket_url: &str) -> bool {
     crate::bridge::evaluate_script_with_await_promise(
         websocket_url,
-        crate::assets::pet_real_mouse_capability_probe_script(),
+        &crate::assets::pet_real_mouse_capability_probe_script(),
         true,
     )
     .await

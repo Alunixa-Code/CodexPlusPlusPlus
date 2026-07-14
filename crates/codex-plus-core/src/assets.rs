@@ -24,16 +24,61 @@ pub fn pet_real_mouse_script() -> &'static str {
     PET_REAL_MOUSE_SCRIPT
 }
 
-pub fn pet_real_mouse_capability_probe_script() -> &'static str {
-    r#"
+const PET_V2_SPRITE_DETECTION_SCRIPT: &str = r#"
+  const isV2Sprite = async (mascot) => {
+    if (!mascot) return false;
+    if (Array.from(mascot.querySelectorAll("img")).some((image) =>
+      image.naturalWidth === 1536 && image.naturalHeight === 2288
+    )) return true;
+    for (const element of [mascot, ...mascot.querySelectorAll("*")]) {
+      const background = getComputedStyle(element).backgroundImage || "";
+      const match = background.match(/url\(["']?([^"')]+)/i);
+      if (!match) continue;
+      const source = match[1];
+      const cacheKey = "__codexPlusPetV2SpriteProbe";
+      let probe = window[cacheKey];
+      if (!probe || probe.source !== source) {
+        probe = { source, valid: false, pending: true };
+        probe.promise = (async () => {
+          try {
+            const image = new Image();
+            image.src = source;
+            await image.decode();
+            return image.naturalWidth === 1536 && image.naturalHeight === 2288;
+          } catch {
+            return false;
+          }
+        })().then((valid) => {
+          probe.valid = valid;
+          probe.pending = false;
+          return valid;
+        });
+        window[cacheKey] = probe;
+      }
+      const wasPending = probe.pending;
+      const valid = wasPending ? await probe.promise : probe.valid;
+      if (wasPending) {
+        const currentBackground = getComputedStyle(element).backgroundImage || "";
+        const currentMatch = currentBackground.match(/url\(["']?([^"')]+)/i);
+        if (currentMatch?.[1] !== source) continue;
+      }
+      if (window[cacheKey] === probe && valid) return true;
+    }
+    return false;
+  };
+"#;
+
+pub fn pet_real_mouse_capability_probe_script() -> String {
+    let mut script = String::from(
+        r#"
 (async () => {
   const mascot = document.querySelector('[data-avatar-mascot="true"]');
-  if (!mascot) return false;
-  const spriteImages = Array.from(mascot.querySelectorAll("img"));
-  const currentSpriteIsV2 = spriteImages.some((image) =>
-    image.naturalWidth === 1536 && image.naturalHeight === 2288
-  );
-  if (!currentSpriteIsV2) return false;
+"#,
+    );
+    script.push_str(PET_V2_SPRITE_DETECTION_SCRIPT);
+    script.push_str(
+        r#"
+  if (!await isV2Sprite(mascot)) return false;
   const urls = [
     ...Array.from(document.scripts || []).map((script) => script.src),
     ...Array.from(document.querySelectorAll("link[href]") || []).map((link) => link.href),
@@ -63,20 +108,25 @@ pub fn pet_real_mouse_capability_probe_script() -> &'static str {
     return false;
   }
 })()
-"#
+"#,
+    );
+    script
 }
 
 pub fn pet_real_mouse_update_script(x: i32, y: i32) -> String {
-    format!(
-        r#"(() => {{
+    let mut script = String::from(
+        r#"(async () => {
   const mascot = document.querySelector('[data-avatar-mascot="true"]');
-  const currentSpriteIsV2 = !!mascot && Array.from(mascot.querySelectorAll("img")).some((image) =>
-    image.naturalWidth === 1536 && image.naturalHeight === 2288
-  );
-  return currentSpriteIsV2
+"#,
+    );
+    script.push_str(PET_V2_SPRITE_DETECTION_SCRIPT);
+    script.push_str(&format!(
+        r#"
+  return await isV2Sprite(mascot)
     && window.__codexPlusPetRealMouseLook?.updateScreenPoint?.({{ x: {x}, y: {y} }}) === true;
 }})()"#
-    )
+    ));
+    script
 }
 
 pub fn pet_real_mouse_stop_script() -> &'static str {

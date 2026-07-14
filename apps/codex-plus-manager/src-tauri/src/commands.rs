@@ -479,25 +479,16 @@ fn spawn_codex_plus_launch(request: LaunchRequest, accepted_message: &str) -> Co
 }
 
 fn spawn_silent_launcher(request: &LaunchRequest) -> anyhow::Result<()> {
-    let launcher = codex_plus_core::install::companion_binary_path(SILENT_BINARY);
-    let mut command = std::process::Command::new(&launcher);
+    let mut args = Vec::new();
     if !request.app_path.trim().is_empty() {
-        command.arg("--app-path").arg(request.app_path.trim());
+        args.push("--app-path".to_string());
+        args.push(request.app_path.trim().to_string());
     }
-    command
-        .arg("--debug-port")
-        .arg(request.debug_port.to_string())
-        .arg("--helper-port")
-        .arg(request.helper_port.to_string());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!("无法启动 {}：{error}", launcher.to_string_lossy()))
+    args.push("--debug-port".to_string());
+    args.push(request.debug_port.to_string());
+    args.push("--helper-port".to_string());
+    args.push(request.helper_port.to_string());
+    codex_plus_core::install::spawn_companion(SILENT_BINARY, &args).map(|_| ())
 }
 
 #[tauri::command]

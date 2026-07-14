@@ -2657,8 +2657,9 @@ function RelayScreen({
             />
             <span>
               <strong>{t("启用供应商配置切换")}</strong>
-              <small>{t("关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。")}</small>
+              <small>{t("关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。")}</small>
             </span>
+            <ToggleVisual />
           </label>
           <div className="relay-add-row">
             <Button
@@ -2829,6 +2830,7 @@ function EnhanceScreen({
               <strong>{t("启用 Codex增强")}</strong>
               <small>{t("关闭后会停用删除、导出、项目移动、插件相关和菜单位置增强。")}</small>
             </span>
+            <ToggleVisual />
           </label>
           <label className="switch-row">
             <input
@@ -2840,6 +2842,7 @@ function EnhanceScreen({
               <strong>{t("启用 Windows Computer Use Guard")}</strong>
               <small>{t("默认关闭；开启后启动 Codex 时会自动保留官方 Computer Use 插件所需的 config.toml、bundled 插件和 notify 配置。")}</small>
             </span>
+            <ToggleVisual />
           </label>
           <ModeSelector launchMode={form.launchMode} actions={actions} />
           {form.launchMode === "relay" ? (
@@ -3000,6 +3003,7 @@ function ZedRemoteScreen({
                 <strong>{t("记录最近打开")}</strong>
                 <small>{t("保存到 Codex++ state，不改写 Zed settings。")}</small>
               </span>
+              <ToggleVisual />
             </label>
           </div>
           <Toolbar>
@@ -3277,6 +3281,7 @@ function SessionsScreen({
               <strong>{t("启动前自动修复历史会话")}</strong>
               <small>{t("开启后，通过 Codex++ 启动 Codex 前自动整理一次旧对话的归属标记。")}</small>
             </span>
+            <ToggleVisual />
           </label>
           <Toolbar>
             <Button onClick={() => void actions.saveSettings()}>{t("保存自动修复设置")}</Button>
@@ -3623,6 +3628,7 @@ function SettingsScreen({
                   : t("当前平台不支持开机自启。")}
               </small>
             </span>
+            <ToggleVisual />
           </label>
           <div className="theme-row">
             <div>
@@ -3724,7 +3730,7 @@ function SettingsScreen({
             </div>
           </div>
           <div className="settings-block">
-            <label className="check-row">
+            <label className="inline-toggle">
               <input
                 checked={form.codexAppImageOverlayEnabled}
                 onChange={(event) =>
@@ -3733,6 +3739,7 @@ function SettingsScreen({
                 type="checkbox"
               />
               <span>{t("启用 Codex 图片覆盖层")}</span>
+              <ToggleVisual />
             </label>
             <div className="form-row">
               <Field label={t("覆盖图片")}>
@@ -4427,7 +4434,7 @@ function RelayProfileEditor({
           </p>
         </Field>
         <Field className="relay-field-goals" label={t("Codex 目标")}>
-          <label className="inline-check">
+          <label className="inline-toggle">
             <input
               checked={configHasCodexGoalsFeature(profile.configContents)}
               onChange={(event) =>
@@ -4438,6 +4445,7 @@ function RelayProfileEditor({
               type="checkbox"
             />
             <span>{t("启用目标功能")}</span>
+            <ToggleVisual />
           </label>
         </Field>
         <div className="relay-advanced-toggle">
@@ -4470,13 +4478,14 @@ function RelayProfileEditor({
               />
             </Field>
             <Field className="relay-field-auto-compact" label={t("自动压缩百分比")}>
-              <label className="inline-check">
+              <label className="inline-toggle">
                 <input
                   checked={profile.autoCompactEnabled}
                   onChange={(event) => updateDraft({ autoCompactEnabled: event.currentTarget.checked })}
                   type="checkbox"
                 />
                 <span>{t("启用自动压缩")}</span>
+                <ToggleVisual />
               </label>
               <Input
                 disabled={!profile.autoCompactEnabled}
@@ -4501,13 +4510,14 @@ function RelayProfileEditor({
         ) : null}
         {profile.relayMode === "official" ? (
           <Field className="relay-field-official-key" label="API Key">
-            <label className="inline-check">
+            <label className="inline-toggle">
               <input
                 checked={profile.officialMixApiKey}
                 onChange={(event) => updateDraft({ officialMixApiKey: event.currentTarget.checked })}
                 type="checkbox"
               />
               <span>{t("混入 API KEY")}</span>
+              <ToggleVisual />
             </label>
           </Field>
         ) : null}
@@ -4801,13 +4811,14 @@ function CustomModelsRelayProfileEditor({
                 <Input value={model.contextWindow} onChange={(event) => updateModel(index, { contextWindow: event.currentTarget.value })} placeholder="200000 / 1M" />
               </Field>
               <Field label={t("自动压缩百分比")}>
-                <label className="inline-check">
+                <label className="inline-toggle">
                   <input
                     checked={model.autoCompactEnabled}
                     onChange={(event) => updateModel(index, { autoCompactEnabled: event.currentTarget.checked })}
                     type="checkbox"
                   />
                   <span>{t("启用自动压缩")}</span>
+                  <ToggleVisual />
                 </label>
                 <Input
                   disabled={!model.autoCompactEnabled}
@@ -5488,8 +5499,16 @@ function FeatureToggle({
         <strong>{title}</strong>
         <small>{detail}</small>
       </span>
-      <Badge status={!disabled && checked ? "ok" : "disabled"} />
+      <ToggleVisual />
     </label>
+  );
+}
+
+function ToggleVisual() {
+  return (
+    <span aria-hidden="true" className="toggle-switch-visual">
+      <span className="toggle-switch-thumb" />
+    </span>
   );
 }
 

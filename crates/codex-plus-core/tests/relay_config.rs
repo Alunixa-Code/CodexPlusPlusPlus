@@ -2,6 +2,7 @@ use codex_plus_core::codex_sqlite::codex_session_db_path_from_home;
 use codex_plus_core::relay_config::{
     apply_pure_api_config_to_home, apply_relay_config_file_to_home, apply_relay_config_to_home,
     apply_relay_files_to_home, apply_relay_files_to_home_with_common,
+    apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard,
     apply_relay_profile_files_to_home_with_context, apply_relay_profile_to_home_with_switch_rules,
     apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard,
     backfill_relay_profile_from_home, backfill_relay_profile_from_home_with_common,
@@ -516,7 +517,7 @@ fn apply_pure_api_config_switches_auth_json_and_writes_provider_token() {
     assert!(!config.contains(r#"model = "gpt-5""#));
     assert_eq!(
         auth,
-        serde_json::json!({"OPENAI_API_KEY":"sk-test-redacted"})
+        serde_json::json!({"auth_mode":"apikey","OPENAI_API_KEY":"sk-test-redacted"})
     );
     assert!(config.contains(r#"model_provider = "custom""#));
     assert!(config.contains("[model_providers.custom]"));
@@ -1383,6 +1384,102 @@ fn apply_relay_config_file_switches_config_without_touching_auth_json() {
         std::fs::read_to_string(home.join("auth.json")).unwrap(),
         "{\"auth_mode\":\"chatgpt\"}\n"
     );
+}
+
+#[test]
+fn startup_custom_model_sync_preserves_codex_auth_and_skips_unchanged_rewrite() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let auth = r#"{"auth_mode":"apikey","OPENAI_API_KEY":"user-entered","account":{"ready":true}}"#;
+    std::fs::write(home.join("auth.json"), auth).unwrap();
+    let profile = RelayProfile {
+        id: "custom-models".to_string(),
+        name: "Custom Models".to_string(),
+        relay_mode: RelayMode::CustomModels,
+        model: "grok-4.5".to_string(),
+        config_contents: r#"model = "grok-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-custom"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"codex-plus-custom"}"#.to_string(),
+        custom_models: vec![CustomRelayModel {
+            id: "grok".to_string(),
+            model: "grok-4.5".to_string(),
+            base_url: "https://example.test/v1".to_string(),
+            api_key: "provider-key".to_string(),
+            context_window: "500000".to_string(),
+            auto_compact_enabled: true,
+            auto_compact_percent: 80,
+            ..CustomRelayModel::default()
+        }],
+        default_custom_model_id: "grok".to_string(),
+        ..RelayProfile::default()
+    };
+
+    let first = apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard(
+        home, &profile, "", false,
+    )
+    .unwrap();
+    let second = apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard(
+        home, &profile, "", false,
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(home.join("auth.json")).unwrap(),
+        auth
+    );
+    assert!(first.backup_path.is_some());
+    assert!(second.backup_path.is_none());
+    let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(!config.contains("model_context_window"));
+    assert!(!config.contains("model_auto_compact_token_limit"));
+}
+
+#[test]
+fn custom_model_switch_writes_complete_apikey_auth_structure() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "custom-models".to_string(),
+        relay_mode: RelayMode::CustomModels,
+        model: "grok-4.5".to_string(),
+        config_contents: r#"model = "grok-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-custom"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"codex-plus-custom"}"#.to_string(),
+        custom_models: vec![CustomRelayModel {
+            id: "grok".to_string(),
+            model: "grok-4.5".to_string(),
+            base_url: "https://example.test/v1".to_string(),
+            api_key: "provider-key".to_string(),
+            ..CustomRelayModel::default()
+        }],
+        default_custom_model_id: "grok".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+    let auth: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(temp.path().join("auth.json")).unwrap())
+            .unwrap();
+    assert_eq!(auth["auth_mode"], "apikey");
+    assert_eq!(auth["OPENAI_API_KEY"], "codex-plus-custom");
 }
 
 #[test]
@@ -2290,7 +2387,7 @@ base_url = "https://relay.example/v1"
     let auth = std::fs::read_to_string(temp.path().join("auth.json")).unwrap();
     let auth: serde_json::Value = serde_json::from_str(&auth).unwrap();
     assert_eq!(auth["OPENAI_API_KEY"], "sk-new");
-    assert!(auth.get("auth_mode").is_none());
+    assert_eq!(auth["auth_mode"], "apikey");
     assert!(auth.get("tokens").is_none());
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(!config.contains("experimental_bearer_token"));
@@ -3083,6 +3180,9 @@ experimental_bearer_token = "codex-plus-custom"
     );
     assert_eq!(profile.context_window, "500000");
     assert_eq!(profile.auto_compact_limit, "400000");
+    let auth: serde_json::Value = serde_json::from_str(&profile.auth_contents).unwrap();
+    assert_eq!(auth["auth_mode"], "apikey");
+    assert_eq!(auth["OPENAI_API_KEY"], "codex-plus-custom");
 }
 
 #[test]

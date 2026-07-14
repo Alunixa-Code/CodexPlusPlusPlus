@@ -295,8 +295,11 @@ fn build_config_toml(base_url: &str, api_key: &str, protocol: RelayProtocol) -> 
 fn build_auth_json(api_key: &str) -> String {
     format!(
         "{}\n",
-        serde_json::to_string_pretty(&serde_json::json!({ "OPENAI_API_KEY": api_key }))
-            .unwrap_or_else(|_| "{\"OPENAI_API_KEY\":\"\"}".to_string())
+        serde_json::to_string_pretty(&serde_json::json!({
+            "auth_mode": "apikey",
+            "OPENAI_API_KEY": api_key
+        }))
+        .unwrap_or_else(|_| "{\"auth_mode\":\"apikey\",\"OPENAI_API_KEY\":\"\"}".to_string())
     )
 }
 

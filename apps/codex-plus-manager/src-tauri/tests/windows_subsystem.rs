@@ -29,6 +29,8 @@ fn manager_uses_single_instance_guard_before_starting_tauri() {
     assert!(lib_rs.contains("acquire_single_instance_guard()"));
     assert!(lib_rs.contains("manager_guard_port"));
     assert!(lib_rs.contains("manager.already_running"));
+    assert!(lib_rs.contains("focus_existing_manager_window()"));
+    assert!(lib_rs.contains("windows_activate_process_window"));
 }
 
 #[test]

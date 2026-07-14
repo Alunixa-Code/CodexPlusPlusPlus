@@ -155,8 +155,8 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭": "Off",
   "关闭后会停用删除、导出、项目移动、插件相关和菜单位置增强。":
     "When off, disables deletion, export, project move, plugin-related and menu placement enhancements.",
-  "关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。":
-    "When off, this tool won't write Codex's config.toml / auth.json on manual switches; it never auto-modifies these files when launching Codex.",
+  "关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。":
+    "When disabled, Codex config is not changed manually. When enabled, the launcher only syncs config.toml for the active custom-model provider and preserves the existing auth.json.",
   "兼容增强": "Compatible enhancement",
   "本地内置推荐，断网也可完整显示": "Local recommendations work offline.",
   "内置": "Built-in",

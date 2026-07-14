@@ -96,8 +96,10 @@ fn pet_real_mouse_capability_probe_rejects_v1_without_explicit_v2_evidence() {
     assert!(probe.contains("data-avatar-mascot"));
     assert!(probe.contains("image.naturalWidth === 1536"));
     assert!(probe.contains("image.naturalHeight === 2288"));
-    assert!(!probe.contains("new Image()"));
-    assert!(probe.contains("if (!currentSpriteIsV2) return false"));
+    assert!(probe.contains("getComputedStyle(element).backgroundImage"));
+    assert!(probe.contains("const image = new Image()"));
+    assert!(probe.contains("await image.decode()"));
+    assert!(probe.contains("if (!await isV2Sprite(mascot)) return false"));
     assert!(!probe.contains("spriteVersionNumber"));
     assert!(probe.contains("dispatchHostMessage"));
     assert!(probe.contains("typeof value.subscribe === \"function\""));
@@ -112,6 +114,9 @@ fn pet_real_mouse_update_script_stops_when_runtime_capability_is_missing() {
     assert!(script.contains("data-avatar-mascot"));
     assert!(script.contains("image.naturalWidth === 1536"));
     assert!(script.contains("image.naturalHeight === 2288"));
+    assert!(script.contains("getComputedStyle(element).backgroundImage"));
+    assert!(script.contains("await image.decode()"));
+    assert!(script.contains("__codexPlusPetV2SpriteProbe"));
     assert!(script.contains("updateScreenPoint?.({ x: -125, y: 640 }) === true"));
 }
 
