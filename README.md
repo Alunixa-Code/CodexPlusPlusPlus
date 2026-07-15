@@ -1,4 +1,6 @@
-# Codex++
+# Codex+++
+
+上游为Codex++
 
 <p align="center">
   <img src="docs/images/codex-plus-plus.png" alt="Codex++ 图标" width="160">
