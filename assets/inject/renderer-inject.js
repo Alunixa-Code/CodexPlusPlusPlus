@@ -94,11 +94,148 @@
 
   function installCodexPlusForceChineseLocale() {
     const config = window.__CODEX_PLUS_FORCE_CHINESE_LOCALE__;
-    if (!config || config.enabled !== true) return;
-    if (window.__codexPlusForceChineseLocaleInstalled === "1") return;
-    window.__codexPlusForceChineseLocaleInstalled = "1";
+    if (!config) return;
+    const enabled = config.enabled === true;
     const locale = typeof config.locale === "string" && config.locale ? config.locale : "zh-CN";
+    const installationKey = `2:${enabled ? "on" : "off"}:${locale}`;
+    if (window.__codexPlusForceChineseLocaleInstalled === installationKey) return;
+    window.__codexPlusForceChineseLocaleInstalled = installationKey;
     const languages = [locale, "zh", "en-US", "en"];
+    const managedLocaleStorageKey = "codexPlus.forceChineseLocale.managed.v1";
+    const localeReloadStorageKey = "codexPlus.forceChineseLocale.reload.v1";
+
+    const readManagedLocale = () => {
+      try {
+        const value = JSON.parse(window.localStorage.getItem(managedLocaleStorageKey) || "null");
+        return value && typeof value === "object" ? value : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const writeManagedLocale = (value) => {
+      try {
+        if (value) {
+          window.localStorage.setItem(managedLocaleStorageKey, JSON.stringify(value));
+        } else {
+          window.localStorage.removeItem(managedLocaleStorageKey);
+        }
+      } catch {
+      }
+    };
+
+    const waitForElectronBridge = () => new Promise((resolve) => {
+      const startedAt = Date.now();
+      const check = () => {
+        const bridge = window.electronBridge;
+        if (bridge && typeof bridge.sendMessageFromView === "function") {
+          resolve(bridge);
+          return;
+        }
+        if (Date.now() - startedAt >= 5000) {
+          resolve(null);
+          return;
+        }
+        window.setTimeout(check, 50);
+      };
+      check();
+    });
+
+    const callCodexSettingApi = (bridge, method, params) => new Promise((resolve, reject) => {
+      const requestId = typeof crypto?.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `codex-plus-locale-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      let timeout;
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+      };
+      const onMessage = (event) => {
+        const message = event?.data;
+        if (!message || message.type !== "fetch-response" || message.requestId !== requestId) return;
+        cleanup();
+        if (message.responseType !== "success") {
+          reject(new Error(message.error || `Codex ${method} failed`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(message.bodyJsonString || "null"));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      window.addEventListener("message", onMessage);
+      timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error(`Codex ${method} timed out`));
+      }, 5000);
+      const message = {
+        type: "fetch",
+        requestId,
+        method: "POST",
+        url: `vscode://codex/${method}`,
+        body: JSON.stringify({ params }),
+      };
+      Promise.resolve(bridge.sendMessageFromView(message)).catch((error) => {
+        cleanup();
+        reject(error);
+      });
+    });
+
+    const reloadAfterLocaleChange = (value) => {
+      const marker = JSON.stringify(value);
+      try {
+        if (window.sessionStorage.getItem(localeReloadStorageKey) === marker) return;
+        window.sessionStorage.setItem(localeReloadStorageKey, marker);
+      } catch {
+      }
+      window.location.reload();
+    };
+
+    const clearLocaleReloadMarker = () => {
+      try {
+        window.sessionStorage.removeItem(localeReloadStorageKey);
+      } catch {
+      }
+    };
+
+    const syncOfficialLocaleSetting = async () => {
+      const managed = readManagedLocale();
+      if (!enabled && !managed) return;
+      const bridge = await waitForElectronBridge();
+      if (!bridge) return;
+      const response = await callCodexSettingApi(bridge, "get-setting", { key: "localeOverride" });
+      const currentValue = response?.value ?? null;
+
+      if (enabled) {
+        if (currentValue === locale) {
+          clearLocaleReloadMarker();
+          return;
+        }
+        if (!managed) {
+          writeManagedLocale({ appliedLocale: locale, previousValue: currentValue });
+        }
+        await callCodexSettingApi(bridge, "set-setting", { key: "localeOverride", value: locale });
+        reloadAfterLocaleChange(locale);
+        return;
+      }
+
+      if (currentValue !== managed.appliedLocale) {
+        writeManagedLocale(null);
+        clearLocaleReloadMarker();
+        return;
+      }
+      const previousValue = managed.previousValue ?? null;
+      await callCodexSettingApi(bridge, "set-setting", {
+        key: "localeOverride",
+        value: previousValue,
+      });
+      writeManagedLocale(null);
+      reloadAfterLocaleChange(previousValue);
+    };
+
+    syncOfficialLocaleSetting().catch(() => {});
+    if (!enabled) return;
 
     const defineNavigatorGetter = (name, value) => {
       try {
@@ -249,6 +386,9 @@
   const conversationViewMaxAllowedWidth = 4000;
   const conversationViewDefaultWidth = 900;
   const conversationViewLegacyWidthKey = "codexPlus.threadCenter.maxWidth";
+  const subAgentMinThreads = 3;
+  const subAgentMaxThreads = 50;
+  const subAgentDefaultThreads = 3;
   const zedRemoteButtonClass = "codex-zed-remote-button";
   const zedRemoteOpenInMenuItemClass = "codex-zed-open-in-menu-item";
   const zedRemoteToastClass = "codex-zed-remote-toast";
@@ -1047,6 +1187,21 @@
         padding: 0 8px;
       }
       .codex-plus-width-input:disabled { opacity: .55; cursor: not-allowed; }
+      .codex-plus-number-control { display: flex; align-items: center; justify-content: flex-end; min-width: 92px; align-self: center; }
+      .codex-plus-number-input {
+        width: 82px;
+        height: 30px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255,255,255,.18);
+        border-radius: 7px;
+        background: rgba(255,255,255,.08);
+        color: #f3f4f6;
+        font: 600 13px system-ui, sans-serif;
+        padding: 0 8px;
+      }
+      .codex-plus-number-input:focus { border-color: #a855f7; outline: 2px solid rgba(168,85,247,.18); }
+      .codex-plus-number-input:disabled { opacity: .55; cursor: not-allowed; }
+      .codex-plus-restart-status { color: #fbbf24; font-size: 12px; line-height: 1.4; }
       .codex-plus-service-tier-control { display: grid; gap: 6px; min-width: 316px; justify-items: end; align-self: center; }
       .codex-plus-service-tier-status { color: #a1a1aa; font-size: 12px; line-height: 1.3; text-align: right; }
       .codex-plus-service-tier-status[data-status="ok"] { color: #34d399; }
@@ -1411,6 +1566,114 @@
     setCodexPlusSetting("conversationViewMaxWidth", width);
   }
 
+  function normalizeSubAgentMaxThreads(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return subAgentDefaultThreads;
+    return Math.max(subAgentMinThreads, Math.min(subAgentMaxThreads, Math.round(number)));
+  }
+
+  function subAgentMaxThreadCount() {
+    return normalizeSubAgentMaxThreads(codexPlusBackendSettings.codexAppSubAgentMaxThreads);
+  }
+
+  function refreshSubAgentControls() {
+    const value = subAgentMaxThreadCount();
+    document.querySelectorAll("[data-codex-plus-sub-agent-max-threads]").forEach((input) => {
+      input.value = String(value);
+      input.disabled = !codexPlusBackendSettingsLoaded;
+    });
+  }
+
+  let subAgentRestartRequired = false;
+  let subAgentRestartMessage = "";
+
+  function refreshSubAgentRestartControls() {
+    document.querySelectorAll("[data-codex-plus-sub-agent-restart-row]").forEach((row) => {
+      row.hidden = !subAgentRestartRequired;
+    });
+    document.querySelectorAll("[data-codex-plus-sub-agent-restart-status]").forEach((status) => {
+      status.textContent = subAgentRestartMessage || "当前 Codex 需要重启后才能应用这个数量。";
+    });
+  }
+
+  async function setSubAgentMaxThreads(value) {
+    const normalized = normalizeSubAgentMaxThreads(value);
+    try {
+      await setBackendSetting("codexAppSubAgentMaxThreads", normalized);
+    } catch (error) {
+      subAgentRestartRequired = false;
+      subAgentRestartMessage = "";
+      refreshSubAgentRestartControls();
+      showToast("Sub agent 数量保存失败", null);
+      sendCodexPlusDiagnostic("sub_agent_setting_save_failed", {
+        maxThreads: normalized,
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+      await loadBackendSettings();
+      return;
+    }
+    try {
+      await codexStateCall("batch-write-config-value", {
+        params: {
+          hostId: "local",
+          edits: [{
+            keyPath: "agents.max_threads",
+            value: normalized,
+            mergeStrategy: "upsert",
+          }],
+          filePath: null,
+          expectedVersion: null,
+          reloadUserConfig: true,
+        },
+      });
+      subAgentRestartRequired = false;
+      subAgentRestartMessage = "";
+      refreshSubAgentRestartControls();
+      showToast(`Sub agent 数量已实时更新为 ${normalized}`, null);
+    } catch (error) {
+      subAgentRestartRequired = true;
+      subAgentRestartMessage = "配置已保存，但当前 Codex 未能热重载，需要重启后生效。";
+      refreshSubAgentRestartControls();
+      sendCodexPlusDiagnostic("sub_agent_config_reload_failed", {
+        maxThreads: normalized,
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+    }
+  }
+
+  function helperPortFromBase() {
+    try {
+      return Number(new URL(helperBase).port) || 57321;
+    } catch {
+      return 57321;
+    }
+  }
+
+  async function restartCodexForPendingSettings() {
+    const button = document.querySelector("[data-codex-plus-restart-codex]");
+    if (button) button.disabled = true;
+    subAgentRestartMessage = "正在请求重启 Codex…";
+    refreshSubAgentRestartControls();
+    try {
+      await postJson("/codex/restart", {
+        debugPort: 9229,
+        helperPort: helperPortFromBase(),
+      });
+      subAgentRestartMessage = "Codex 正在重启，窗口会短暂关闭后重新打开。";
+      refreshSubAgentRestartControls();
+    } catch (error) {
+      if (button) button.disabled = false;
+      subAgentRestartMessage = "重启请求失败，请在 Codex++ 管理器中重启 Codex。";
+      refreshSubAgentRestartControls();
+      sendCodexPlusDiagnostic("sub_agent_restart_request_failed", {
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+    }
+  }
+
   function renderCodexPlusMenu() {
     const settings = codexPlusSettings();
     document.querySelectorAll(".codex-plus-toggle[data-codex-plus-setting]").forEach((button) => {
@@ -1421,10 +1684,12 @@
       button.disabled = waitsForBackend || button.dataset.relayUnneeded === "true";
     });
     refreshConversationViewControls();
+    refreshSubAgentControls();
+    refreshSubAgentRestartControls();
     refreshCodexServiceTierControls();
   }
 
-  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "" };
+  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads };
   let codexPlusBackendSettingsSeq = 0;
   const codexPluginLegacyEntryUnlockBeforeVersion = "26.601.2237";
   const codexPluginBridgeRequestUnlockFromVersion = "26.616.0";
@@ -2618,7 +2883,7 @@
         <div class="codex-plus-modal-body">
           <div class="codex-plus-panel" data-codex-plus-panel="home">
             <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">后端连接</div><div class="codex-plus-row-description">每 5 秒检查一次 launcher 后端状态。</div></div>
+              <div><div class="codex-plus-row-title">后端连接</div><div class="codex-plus-row-description">通过 CDP 长连接实时感知 launcher 后端状态。</div></div>
               <div class="codex-plus-backend-status">
                 <div class="codex-plus-backend-label" data-codex-backend-status="true" data-status="checking">正在检查后端…</div>
               </div>
@@ -2638,6 +2903,16 @@
             <div class="codex-plus-row">
               <div><div class="codex-plus-row-title">Fast 按钮</div><div class="codex-plus-row-description">显示服务模式切换按钮；Fast 仅支持 ${codexServiceTierFastModelListLabel()}，其他模型按 Standard 发送。</div></div>
               <button type="button" class="codex-plus-toggle" data-codex-plus-setting="serviceTierControls"><span></span></button>
+            </div>
+            <div class="codex-plus-row">
+              <div><div class="codex-plus-row-title">Sub agent 数量</div><div class="codex-plus-row-description">设置 Codex 同时运行的 agent 线程上限，可填写 3 到 50。</div></div>
+              <div class="codex-plus-number-control">
+                <input class="codex-plus-number-input" data-codex-plus-sub-agent-max-threads="true" inputmode="numeric" min="${subAgentMinThreads}" max="${subAgentMaxThreads}" step="1" type="number" value="${subAgentMaxThreadCount()}">
+              </div>
+            </div>
+            <div class="codex-plus-row" data-codex-plus-sub-agent-restart-row="true" hidden>
+              <div><div class="codex-plus-row-title">应用 Sub agent 配置</div><div class="codex-plus-restart-status" data-codex-plus-sub-agent-restart-status="true">当前 Codex 需要重启后才能应用这个数量。</div></div>
+              <button type="button" class="codex-plus-action-button" data-codex-plus-restart-codex="true">重启 Codex</button>
             </div>
             ${codexPlusIsWindowsPlatform ? `<div class="codex-plus-row">
               <div><div class="codex-plus-row-title">桌宠跟随真实鼠标</div><div class="codex-plus-row-description">仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。</div></div>
@@ -2795,6 +3070,12 @@
         widthInput.value = String(width || conversationViewWidth());
         setConversationViewWidth(widthInput.value);
       }
+      const subAgentInput = target?.closest("[data-codex-plus-sub-agent-max-threads]");
+      if (subAgentInput) {
+        const value = normalizeSubAgentMaxThreads(subAgentInput.value);
+        subAgentInput.value = String(value);
+        void setSubAgentMaxThreads(value);
+      }
     }, true);
     overlay.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
@@ -2813,6 +3094,10 @@
       }
       if (target?.closest("[data-codex-open-manager]")) {
         openManagerFromCodex();
+        return;
+      }
+      if (target?.closest("[data-codex-plus-restart-codex]")) {
+        void restartCodexForPendingSettings();
         return;
       }
       if (target?.closest("[data-codex-plus-discord]")) {

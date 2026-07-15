@@ -36,12 +36,11 @@ Codex++ 是面向 OpenAI Codex / ChatGPT 桌面应用的外部启动器与管理
 
 首次使用建议先打开管理工具，确认应用路径和运行状态，再配置供应商与增强功能，最后从 `Codex++` 入口启动。Windows 安装包会创建桌面和开始菜单快捷方式；macOS DMG 会安装 `/Applications/Codex++.app` 和 `/Applications/Codex++ 管理工具.app`。
 
-
 如果 Codex++ 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
 
 <p align="center">
-  <img src="docs/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="220">
-  <img src="docs/images/sponsor-wechat.jpg" alt="微信赞赏码" width="220">
+  <img src="assets/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="220">
+  <img src="assets/images/sponsor-wechat.jpg" alt="微信赞赏码" width="220">
 </p>
 
 ## 当前功能
