@@ -11,6 +11,7 @@ apps/codex-plus-manager/src-tauri/gen/
 
 .codex_asar_extract/
 .codex_asar_extract_latest/
+.release-v*/
 .superpowers/
 .claude/
 docs/superpowers/
@@ -24,4 +25,3 @@ tools/codex-wechat/config.local.json
 # pnpm artifacts (project uses npm)
 pnpm-lock.yaml
 pnpm-workspace.yaml
-

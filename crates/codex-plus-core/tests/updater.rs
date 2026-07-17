@@ -45,7 +45,7 @@ fn release_summary_is_bounded_by_lines_and_characters() {
 fn github_payload_selects_platform_installer() {
     let release = release_from_github_payload(&json!({
         "tag_name": "v1.0.9",
-        "html_url": "https://github.com/ygzzfyh123/CodexPlusPlus/releases/tag/v1.0.9",
+        "html_url": "https://github.com/ygzzfyh123/CodexPPP/releases/tag/v1.0.9",
         "body": "fixes",
         "assets": [
             {"name": "source.zip", "browser_download_url": "https://example.test/source.zip"},
@@ -95,7 +95,7 @@ fn github_payload_rejects_non_stable_releases() {
 fn latest_json_payload_selects_platform_installer_without_github_api_shape() {
     let release = release_from_latest_json_payload(&json!({
         "version": "v1.1.6",
-        "url": "https://github.com/ygzzfyh123/CodexPlusPlus/releases/tag/v1.1.6",
+        "url": "https://github.com/ygzzfyh123/CodexPPP/releases/tag/v1.1.6",
         "body": "静态更新描述",
         "assets": [
             {"name": "source.zip", "url": "https://example.test/source.zip"},

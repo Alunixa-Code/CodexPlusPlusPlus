@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const DEFAULT_REPOSITORY: &str = "ygzzfyh123/CodexPlusPlus";
+pub const DEFAULT_REPOSITORY: &str = "ygzzfyh123/CodexPPP";
 pub const DEFAULT_LATEST_RELEASE_API_URL: &str =
-    "https://api.github.com/repos/ygzzfyh123/CodexPlusPlus/releases/latest";
-pub const DEFAULT_RELEASES_PAGE_URL: &str = "https://github.com/ygzzfyh123/CodexPlusPlus/releases";
+    "https://api.github.com/repos/ygzzfyh123/CodexPPP/releases/latest";
+pub const DEFAULT_RELEASES_PAGE_URL: &str = "https://github.com/ygzzfyh123/CodexPPP/releases";
 pub const MAX_RELEASE_SUMMARY_CHARS: usize = 1200;
 pub const MAX_RELEASE_SUMMARY_LINES: usize = 12;
 

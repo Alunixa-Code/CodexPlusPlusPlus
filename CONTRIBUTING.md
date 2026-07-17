@@ -6,7 +6,7 @@ Thank you for your interest in contributing to CodexPlusPlus!
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/ygzzfyh123/CodexPlusPlus.git
+   git clone https://github.com/ygzzfyh123/CodexPPP.git
    cd CodexPlusPlus
    ```
 
