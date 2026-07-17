@@ -940,6 +940,15 @@ body {
   pointer-events: auto;
 }
 
+/* Keep action buttons hit-testable even when the card is only partially hovered,
+ * which is common with trackpads and macOS WebView focus behavior. */
+.relay-profile-card.active .relay-card-actions,
+.relay-card-actions:hover,
+.relay-card-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .relay-detail-page {
   position: absolute;
   inset: 0;
@@ -3196,6 +3205,11 @@ body {
     grid-column: 3;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .relay-profile-card .relay-card-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .table-row {

@@ -5099,7 +5099,9 @@
     codexModelCatalogPromise = postJson("/codex-model-catalog", {})
       .then(async (result) => {
         codexModelCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
-        if ((!codexModelCatalog.models || codexModelCatalog.models.length === 0) && codexModelCatalog.status === "not_configured") {
+        const modelsMissing = !Array.isArray(codexModelCatalog.models) || codexModelCatalog.models.length === 0;
+        const detailsMissing = !Array.isArray(codexModelCatalog.model_details) || codexModelCatalog.model_details.length === 0;
+        if (modelsMissing || detailsMissing || codexModelCatalog.status === "not_configured" || codexModelCatalog.status === "failed") {
           try {
             const settingsPromise = postJson("/settings/get", {});
             const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("fallback timeout")), 3000));
@@ -5119,26 +5121,44 @@
                 ]);
                 const extraModels = uniqueValues([...customModels, ...listedModels]);
                 if (extraModels.length > 0) {
-                  codexModelCatalog.models = extraModels;
-                  codexModelCatalog.default_model = codexModelCatalog.default_model || extraModels[0];
-                  codexModelCatalog.model_details = customModelEntries
-                    .map((item) => {
-                      const modelName = String(item?.model || "").trim();
-                      const contextWindow = Number.parseInt(String(item?.contextWindow || ""), 10);
-                      const compactPercent = Number.parseInt(String(item?.autoCompactPercent || ""), 10);
-                      return {
-                        model: modelName,
-                        slug: modelName,
-                        context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
-                        max_context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
-                        effective_context_window_percent: 100,
-                        auto_compact_token_limit: item?.autoCompactEnabled && Number.isFinite(contextWindow) && contextWindow > 0
-                          ? Math.max(1, Math.min(contextWindow, Math.floor(contextWindow * (Number.isFinite(compactPercent) ? compactPercent : 80) / 100)))
-                          : null,
-                      };
-                    })
-                    .filter((item) => item.model);
-                  sendCodexPlusDiagnostic("model_catalog_fallback_applied", { count: extraModels.length });
+                  if (modelsMissing) {
+                    codexModelCatalog.models = extraModels;
+                  } else {
+                    codexModelCatalog.models = uniqueValues([...codexModelCatalog.models, ...extraModels]);
+                  }
+                  codexModelCatalog.default_model =
+                    codexModelCatalog.default_model ||
+                    String(defaultCustomModel?.model || "").trim() ||
+                    extraModels[0];
+                  codexModelCatalog.model = codexModelCatalog.model || codexModelCatalog.default_model;
+                  if (detailsMissing || customModelEntries.length > 0) {
+                    codexModelCatalog.model_details = customModelEntries
+                      .map((item) => {
+                        const modelName = String(item?.model || "").trim();
+                        const contextWindow = Number.parseInt(String(item?.contextWindow || ""), 10);
+                        const compactPercent = Number.parseInt(String(item?.autoCompactPercent || ""), 10);
+                        return {
+                          model: modelName,
+                          slug: modelName,
+                          context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
+                          max_context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
+                          effective_context_window_percent: 100,
+                          auto_compact_token_limit: item?.autoCompactEnabled && Number.isFinite(contextWindow) && contextWindow > 0
+                            ? Math.max(1, Math.min(contextWindow, Math.floor(contextWindow * (Number.isFinite(compactPercent) ? compactPercent : 80) / 100)))
+                            : null,
+                        };
+                      })
+                      .filter((item) => item.model);
+                  }
+                  if (codexModelCatalog.status === "not_configured" || codexModelCatalog.status === "failed") {
+                    codexModelCatalog.status = "ok";
+                  }
+                  sendCodexPlusDiagnostic("model_catalog_fallback_applied", {
+                    count: extraModels.length,
+                    customCount: customModels.length,
+                    profileId: profile.id || "",
+                    relayMode: profile.relayMode || "",
+                  });
                 }
               }
             }

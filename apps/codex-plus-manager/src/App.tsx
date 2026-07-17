@@ -1887,12 +1887,17 @@ export function App() {
       showNotice(t("供应商配置已关闭"), t("当前不会写入 Codex config.toml / auth.json。打开供应商配置总开关后再切换。"), "failed");
       return;
     }
+    // Re-selecting the active supplier only re-applies live files; never
+    // backfill the same profile from the proxy auth/config snapshot.
+    const sameActiveProfile =
+      previousActiveRelayId.trim() !== "" && previousActiveRelayId === switchSettings.activeRelayId;
     const targetBeforeSnapshot = activeRelayProfile(switchSettings);
     logDiagnostic("switchRelayProfile.start", {
       currentRelayId: settingsForm.activeRelayId,
       targetRelayId: switchSettings.activeRelayId,
       targetRelayName: targetBeforeSnapshot.name,
       targetRelayMode: targetBeforeSnapshot.relayMode,
+      sameActiveProfile,
     });
     const selectedBeforeSave = activeRelayProfile(switchSettings);
     const validationError = relayProfileSwitchValidation(selectedBeforeSave);
@@ -1905,7 +1910,9 @@ export function App() {
       showNotice(t("供应商配置可能不正确"), validationError, "failed");
       return;
     }
-    switchSettings = await snapshotActiveRelayFilesBeforeSwitch(switchSettings, previousActiveRelayId);
+    if (!sameActiveProfile) {
+      switchSettings = await snapshotActiveRelayFilesBeforeSwitch(switchSettings, previousActiveRelayId);
+    }
     const selectedAfterSave = activeRelayProfile(switchSettings);
     const command = relayProfileSwitchCommand(selectedAfterSave);
 
@@ -1970,6 +1977,13 @@ export function App() {
   ): Promise<BackendSettings> => {
     const profileId = previousActiveRelayId.trim();
     if (!profileId) return next;
+    if (profileId === next.activeRelayId) return next;
+    const previousProfile = next.relayProfiles.find((profile) => profile.id === profileId);
+    // Live files only capture the proxy façade for custom multi-model profiles.
+    // Reading them back would wipe the structured customModels list.
+    if (previousProfile && (isCustomModelsRelayProfile(previousProfile) || isAggregateRelayProfile(previousProfile))) {
+      return next;
+    }
     const result = await run(() =>
       call<SettingsBackfillResult>("backfill_relay_profile_from_live", {
         request: { settings: next, profileId },
@@ -7093,6 +7107,9 @@ function deriveRelayProfileFromFiles(profile: RelayProfile): RelayProfile {
   if (isAggregateRelayProfile(profile)) {
     return normalizeAggregateRelayProfile(profile, null);
   }
+  if (isCustomModelsRelayProfile(profile)) {
+    return normalizeRelayProfile(profile);
+  }
   const configContents = profile.configContents || "";
   const authContents = profile.relayMode === "official" ? buildOfficialRelayAuthJson(profile.authContents || "") : profile.authContents || "";
   const configBaseUrl = codexBaseUrlFromConfig(configContents);
@@ -7439,7 +7456,11 @@ function tomlString(value: string): string {
 
 function syncLegacyRelayFields(settings: BackendSettings): BackendSettings {
   const relayProfiles = settings.relayProfiles.map((profile) =>
-    isAggregateRelayProfile(profile) ? normalizeAggregateRelayProfile(profile, { ...settings, relayProfiles: settings.relayProfiles }) : deriveRelayProfileFromFiles(profile),
+    isAggregateRelayProfile(profile)
+      ? normalizeAggregateRelayProfile(profile, { ...settings, relayProfiles: settings.relayProfiles })
+      : isCustomModelsRelayProfile(profile)
+        ? normalizeRelayProfile(profile)
+        : deriveRelayProfileFromFiles(profile),
   );
   const active = activeRelayProfile({ ...settings, relayProfiles });
   const aggregateRelayProfiles = normalizeAggregateProfilesFromRelayProfiles(relayProfiles);

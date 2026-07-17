@@ -1,7 +1,7 @@
 use codex_plus_core::relay_switch::switch_relay_profile_in_home;
 use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
-    LaunchMode, RelayMode, RelayProfile, SettingsStore,
+    CustomRelayModel, LaunchMode, RelayMode, RelayProfile, SettingsStore,
 };
 
 #[test]
@@ -221,6 +221,126 @@ goals = true
     assert!(returned.api_key.is_empty());
 }
 
+#[test]
+fn switch_does_not_backfill_custom_models_profile_from_proxy_live_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        r#"model = "grok-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-custom"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        home.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"codex-plus-custom"}"#,
+    )
+    .unwrap();
+
+    let custom = custom_models_profile("custom-models");
+    let pure = pure_profile("api", "https://api.example/v1", "sk-api");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let original = BackendSettings {
+        active_relay_id: "custom-models".to_string(),
+        relay_profiles: vec![custom.clone(), pure.clone()],
+        ..BackendSettings::default()
+    };
+    store.save(&original).unwrap();
+
+    let next = BackendSettings {
+        active_relay_id: "api".to_string(),
+        relay_profiles: vec![custom, pure],
+        ..BackendSettings::default()
+    };
+    switch_relay_profile_in_home(&store, &home, next, "custom-models").unwrap();
+
+    let stored = store.load().unwrap();
+    let preserved = stored
+        .relay_profiles
+        .iter()
+        .find(|profile| profile.id == "custom-models")
+        .unwrap();
+    assert_eq!(preserved.relay_mode, RelayMode::CustomModels);
+    assert_eq!(preserved.custom_models.len(), 2);
+    assert_eq!(preserved.custom_models[0].model, "grok-4.5");
+    assert_eq!(preserved.custom_models[0].api_key, "provider-key");
+    assert_eq!(preserved.custom_models[1].model, "gpt-5.6-sol");
+    assert_eq!(preserved.default_custom_model_id, "grok");
+}
+
+#[test]
+fn reselecting_active_custom_models_profile_does_not_wipe_custom_models() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        r#"model = "grok-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-custom"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        home.join("auth.json"),
+        r#"{"auth_mode":"apikey","OPENAI_API_KEY":"codex-plus-custom"}"#,
+    )
+    .unwrap();
+
+    let custom = custom_models_profile("custom-models");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let settings = BackendSettings {
+        active_relay_id: "custom-models".to_string(),
+        relay_profiles: vec![custom.clone()],
+        ..BackendSettings::default()
+    };
+    store.save(&settings).unwrap();
+
+    // Frontend used to backfill the same active profile before re-applying it.
+    let mut corrupted = settings.clone();
+    let previous = corrupted
+        .relay_profiles
+        .iter_mut()
+        .find(|profile| profile.id == "custom-models")
+        .unwrap();
+    codex_plus_core::relay_config::backfill_relay_profile_from_home_with_common(
+        &home,
+        previous,
+        &mut corrupted.relay_context_config_contents,
+    )
+    .unwrap();
+    assert_eq!(previous.relay_mode, RelayMode::CustomModels);
+    assert_eq!(previous.custom_models.len(), 2);
+
+    switch_relay_profile_in_home(&store, &home, corrupted, "custom-models").unwrap();
+
+    let stored = store.load().unwrap();
+    let preserved = stored
+        .relay_profiles
+        .iter()
+        .find(|profile| profile.id == "custom-models")
+        .unwrap();
+    assert_eq!(stored.active_relay_id, "custom-models");
+    assert_eq!(preserved.relay_mode, RelayMode::CustomModels);
+    assert_eq!(preserved.custom_models.len(), 2);
+    assert_eq!(preserved.custom_models[1].model, "gpt-5.6-sol");
+}
+
 fn pure_profile(id: &str, base_url: &str, key: &str) -> RelayProfile {
     RelayProfile {
         id: id.to_string(),
@@ -237,6 +357,51 @@ base_url = "{base_url}"
 "#
         ),
         auth_contents: format!(r#"{{"OPENAI_API_KEY":"{key}"}}"#),
+        ..RelayProfile::default()
+    }
+}
+
+fn custom_models_profile(id: &str) -> RelayProfile {
+    RelayProfile {
+        id: id.to_string(),
+        name: "Custom Models".to_string(),
+        relay_mode: RelayMode::CustomModels,
+        model: "grok-4.5".to_string(),
+        config_contents: r#"model = "grok-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "http://127.0.0.1:57321/v1"
+experimental_bearer_token = "codex-plus-custom"
+"#
+        .to_string(),
+        auth_contents: r#"{"auth_mode":"apikey","OPENAI_API_KEY":"codex-plus-custom"}"#.to_string(),
+        custom_models: vec![
+            CustomRelayModel {
+                id: "grok".to_string(),
+                model: "grok-4.5".to_string(),
+                base_url: "https://example.test/v1".to_string(),
+                api_key: "provider-key".to_string(),
+                context_window: "500000".to_string(),
+                auto_compact_enabled: true,
+                auto_compact_percent: 80,
+                ..CustomRelayModel::default()
+            },
+            CustomRelayModel {
+                id: "sol".to_string(),
+                model: "gpt-5.6-sol".to_string(),
+                base_url: "https://example.test/v1".to_string(),
+                api_key: "provider-key".to_string(),
+                context_window: "353000".to_string(),
+                auto_compact_enabled: true,
+                auto_compact_percent: 80,
+                ..CustomRelayModel::default()
+            },
+        ],
+        default_custom_model_id: "grok".to_string(),
         ..RelayProfile::default()
     }
 }

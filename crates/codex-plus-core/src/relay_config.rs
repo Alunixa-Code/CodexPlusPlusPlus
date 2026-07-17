@@ -773,6 +773,15 @@ pub fn backfill_relay_profile_from_home_with_common(
     profile: &mut RelayProfile,
     common_config_contents: &mut String,
 ) -> anyhow::Result<()> {
+    // Custom multi-model and aggregate profiles keep structured fields that
+    // cannot be reconstructed from the live proxy/auth files. Overwriting them
+    // during switch backfill turns them into empty pure-API defaults.
+    if matches!(
+        profile.relay_mode,
+        crate::settings::RelayMode::CustomModels | crate::settings::RelayMode::Aggregate
+    ) {
+        return Ok(());
+    }
     let live_config = read_optional_text(&home.join("config.toml"))?;
     let template_config = profile.config_contents.clone();
     let template_auth = profile.auth_contents.clone();
@@ -2057,6 +2066,12 @@ fn restore_profile_auth_from_live_config(
 
 fn sync_profile_mode_from_backfilled_live(profile: &mut RelayProfile) {
     if profile.relay_mode == crate::settings::RelayMode::Official && !profile.official_mix_api_key {
+        return;
+    }
+    if matches!(
+        profile.relay_mode,
+        crate::settings::RelayMode::CustomModels | crate::settings::RelayMode::Aggregate
+    ) {
         return;
     }
 

@@ -48,6 +48,11 @@ pub async fn read_codex_model_catalog() -> Value {
             {
                 return catalog;
             }
+            // Custom multi-model profiles always own the catalog, even when the
+            // stored list is temporarily empty; fall back paths would hide them.
+            if profile.relay_mode == RelayMode::CustomModels {
+                return catalog;
+            }
         }
     }
     let env = std::env::vars().collect::<HashMap<_, _>>();
@@ -864,6 +869,23 @@ mod tests {
             catalog["model_details"][0]["auto_compact_token_limit"],
             400_000
         );
+    }
+
+    #[test]
+    fn custom_models_catalog_is_returned_even_when_model_list_is_empty() {
+        let profile = RelayProfile {
+            id: "custom-models".to_string(),
+            name: "Custom Models".to_string(),
+            relay_mode: RelayMode::CustomModels,
+            custom_models: Vec::new(),
+            default_custom_model_id: String::new(),
+            ..RelayProfile::default()
+        };
+        let catalog = relay_profile_model_catalog_value(Path::new("codex-home"), &profile);
+        assert_eq!(catalog["status"], "not_configured");
+        assert_eq!(catalog["model_provider"], "custom-models");
+        assert_eq!(catalog["provider_name"], "Custom Models");
+        assert!(catalog["models"].as_array().unwrap().is_empty());
     }
 }
 
