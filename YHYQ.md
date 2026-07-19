@@ -94,3 +94,7 @@
 - 验证完成：6 项 `official_remote` 测试、管理器 `cargo check`、TypeScript 检查、11 项前端测试、Vite 生产构建、Rust 格式检查、差异检查和凭据扫描均通过。
 - `tools/i18n-verify.mjs` 仍只报告仓库既有的缺失与陈旧翻译键，本次新增设备码相关键没有出现在缺失或陈旧列表中。
 - 已确认仓库未出现 Netscape Cookie、网页 Session Token 或 Cloudflare Cookie 内容；本次不会实现 Cookie 粘贴、保存或转换登录态。
+- 用户明确请求：将设备码登录改动上传 GitHub，通过 GitHub Actions 编译构建并创建 GitHub Release。
+- 已创建发布前检查点 `eea0a37`，确认远端 `main` 是当前分支祖先，远端不存在 `v1.2.51` 标签或 Release。
+- 本次计划发布补丁版本 `v1.2.51`，发布说明将明确设备码登录、浏览器登录保留、纯 API 混合迁移、安全域名校验、Cookie 安全边界和窄屏布局优化。
+- 已将 Rust workspace、Cargo.lock、前端 package、package-lock 和 Tauri 配置版本统一提升到 `1.2.51`，并新增对应更新日志。
