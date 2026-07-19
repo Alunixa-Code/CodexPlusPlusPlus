@@ -62,3 +62,8 @@
 - 最终 workspace 汇总命令因同时运行多个 Cargo 任务、争用构建锁而达到 10 分钟工具上限；已确认没有 Cargo、rustc 或测试子进程残留。
 - 改为按包串行验证后全部通过：`codex-plus-core` 完整测试、`codex-plus-manager` 31 项、`codex-plus-launcher` 4 项、`codex-plus-data` 44 项均为零失败。
 - 最终格式检查、`git diff --check`、TypeScript 检查、11 项前端测试和 Vite 生产构建均通过；工作区保持干净。
+- 用户请求：关闭所有本地预览，将本次 ChatGPT 账号连接与官方手机远控功能上传到 GitHub，通过 GitHub Actions 构建并发布到 GitHub Releases。
+- 已确认并关闭此前由本项目启动的 Vite 预览进程，`127.0.0.1:1420` 已释放；浏览器视觉检查标签此前也已清理。
+- 已核对当前正式版本为 `1.2.49`，本次计划发布补丁版本 `v1.2.50`。
+- 已确认 GitHub CLI 当前登录 `ygzzfyh123`，目标仓库为 `ygzzfyh123/CodexPPP`，现有 `v1.2.49` Release 为正式发行版。
+- 已确认 `release-assets.yml` 会校验版本与本地品牌，并通过 GitHub Actions 构建 Windows x64、macOS x64、macOS ARM64 共六个安装资产后发布 Release。
