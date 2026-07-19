@@ -17,3 +17,6 @@
 - 用户请求：为 Codex++ 增加“关闭 Codex 自动更新”选项，关闭 Codex 桌面应用的自动下载和自动安装更新。
 - 已读取现有工作记录并开始定位 Codex 桌面应用更新链路、设置持久化和注入层实现。
 - 用户再次明确：目标是关闭官方 Codex 桌面应用更新，不是关闭 Codex++ 自身更新；Codex++ 的 GitHub Release 更新功能必须保持不变。
+- 已检查实机 Codex `26.707.9981.0` 的主进程更新器实现，确认 `CODEX_SPARKLE_ENABLED=false` 会在更新器初始化前同时关闭 macOS Sparkle 与 Windows Store/MSIX 更新器。
+- 已确认仅依赖渲染层 `disableSparkleAutodownload` 存在启动时序风险；实现将从 Codex 进程启动环境阻断更新器，并覆盖 Windows 打包版、Windows 便携版和 macOS App 启动链路。
+- 已确认新增开关不会修改 Codex++ 自身的 GitHub Release 检查、下载和安装功能。
