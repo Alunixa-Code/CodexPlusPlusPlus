@@ -59,3 +59,6 @@
 - 专项验证通过：3 项 `official_remote` Rust 测试、管理器 `cargo check`、前端 TypeScript 检查、11 项前端测试和 Vite 生产构建。
 - 已完成页面视觉检查：桌面端 `1280x720` 无横向溢出，窄屏 `390x844` 的 DOM 尺寸检查无文字裁切或控件重叠；普通浏览器缺少 Tauri bridge 时仅会出现预期的 invoke 测试提示。
 - 已扫描仓库，确认用户提供的 Cookie 值和会话凭据未写入代码、日志或工作记录。
+- 最终 workspace 汇总命令因同时运行多个 Cargo 任务、争用构建锁而达到 10 分钟工具上限；已确认没有 Cargo、rustc 或测试子进程残留。
+- 改为按包串行验证后全部通过：`codex-plus-core` 完整测试、`codex-plus-manager` 31 项、`codex-plus-launcher` 4 项、`codex-plus-data` 44 项均为零失败。
+- 最终格式检查、`git diff --check`、TypeScript 检查、11 项前端测试和 Vite 生产构建均通过；工作区保持干净。
