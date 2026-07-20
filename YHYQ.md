@@ -184,3 +184,6 @@
 - 前端 TypeScript 检查、12 项 Node 测试和 Vite 生产构建通过；Vite 仅保留既有的单 chunk 大于 500 KB 提醒。
 - 首次完整 Rust workspace 测试因本地已清理前端 `dist`，在 Tauri `generate_context!` 阶段提示 `frontendDist` 不存在；按 GitHub Actions 的真实顺序先构建前端后重跑，完整 workspace 全部零失败。
 - 已安全删除本次生成的 `apps/codex-plus-manager/dist`，并确认 `1420` 端口没有预览服务。
+- 已提交迁移补丁 `0b4007a`；使用精确远端租约对新仓库 `main` 执行覆盖推送 dry-run 时，Windows Git 凭据、项目指令令牌和 GitHub CLI 当前令牌均返回 Contents 写入 403。
+- 已尝试启动 GitHub CLI OAuth 权限刷新；内置浏览器没有 GitHub 登录态，因此没有输入账号密码或继续授权，随后关闭授权页、停止等待进程并删除临时日志。
+- 继续推送需要为现有令牌授予新仓库 Contents 与 Workflows 写权限，或由用户明确授权使用已登录 Chrome 完成一次 GitHub OAuth。
