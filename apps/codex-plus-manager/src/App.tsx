@@ -5508,6 +5508,22 @@ function CustomModelsRelayProfileEditor({
             ))}
           </select>
         </Field>
+        <Field className="relay-field-goals" label={t("Codex 目标")}>
+          <label className="inline-toggle">
+            <input
+              checked={configHasCodexGoalsFeature(profile.configContents)}
+              onChange={(event) =>
+                onProfileChange({
+                  ...profile,
+                  configContents: setCodexGoalsFeatureInConfig(profile.configContents, event.currentTarget.checked),
+                })
+              }
+              type="checkbox"
+            />
+            <span>{t("启用目标功能")}</span>
+            <ToggleVisual />
+          </label>
+        </Field>
       </div>
       <div className="custom-model-blocks">
         {models.map((model, index) => (
