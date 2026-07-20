@@ -112,6 +112,23 @@ export const EN_PLAIN: Record<string, string> = {
   "记忆嵌入模型": "Memory embedding model",
   "开启后使用 OpenAI 兼容嵌入接口；关闭或接口异常时使用本地 BM25 关键词匹配。":
     "Use an OpenAI-compatible embedding endpoint when enabled. When disabled or unavailable, use local BM25 keyword matching.",
+  "纯文本模型请配置此项": "Choose image handling for text-only models",
+  "原样发送图片": "Send images as-is",
+  "为纯文本模型移除消息中的图片": "Remove images before sending to a text-only model",
+  "为纯文本模型配置图片分析路由": "Analyze images with a separate vision model before sending",
+  "多模态模型（支持图片输入的模型）请保持 send-as-is。":
+    "Keep send-as-is for multimodal models that accept image input.",
+  "Vision Analysis Provider": "Vision analysis provider",
+  "VLM API Key": "VLM API key",
+  "VLM Model": "VLM model",
+  "VLM Base URL": "VLM base URL",
+  "若开启 VLM analysis，请确认 VLM 配置项完整且服务可用。":
+    "When VLM analysis is enabled, make sure the vision provider is fully configured and available.",
+  "适用于 Responses、Chat Completions、Completions、Anthropic 和 Gemini 代理。":
+    "Applies to Responses, Chat Completions, Completions, Anthropic, and Gemini proxy modes.",
+  "VLM 配置不完整：API Key、Model 和 Base URL 为必填项，否则 VLM 不会生效。":
+    "VLM configuration is incomplete. API key, model, and base URL are required.",
+  "未命名模型": "Unnamed model",
   "远程项目": "Remote projects",
   "连接 Zed Remote 和 upstream worktree 辅助能力。": "Connect Zed Remote and upstream worktree helper capabilities.",
   "最多建议数": "Max suggestions",

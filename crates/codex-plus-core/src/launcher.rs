@@ -3239,7 +3239,8 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = listener.accept().await.unwrap();
-            handle_helper_connection(stream, Some(remote_addr))
+            let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
+            handle_helper_connection(stream, Some(remote_addr), connection_shutdown)
                 .await
                 .unwrap();
         });
@@ -3325,7 +3326,8 @@ mod tests {
         let helper_addr = helper_listener.local_addr().unwrap();
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = helper_listener.accept().await.unwrap();
-            handle_helper_connection(stream, Some(remote_addr))
+            let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
+            handle_helper_connection(stream, Some(remote_addr), connection_shutdown)
                 .await
                 .unwrap();
         });

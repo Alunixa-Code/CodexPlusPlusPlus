@@ -1588,22 +1588,20 @@ fn normalize_config_text_for_write(config_text: &str) -> String {
 
 fn preserve_live_desktop_settings(home: &Path, config_text: &str) -> anyhow::Result<String> {
     let normalized = normalize_config_text_for_write(config_text);
-    let live_text = read_optional_text(&home.join("config.toml"))?;
-    if live_text.trim().is_empty() {
-        return Ok(normalized);
-    }
-    let Ok(live_doc) = parse_toml_document(&live_text) else {
-        return Ok(normalized);
-    };
     let mut target_doc = parse_toml_document(&normalized)?;
-    if let Some(live_desktop) = live_doc.get("desktop").cloned() {
-        if !live_desktop.is_none() {
-            merge_toml_item(&mut target_doc["desktop"], &live_desktop);
+    let live_text = read_optional_text(&home.join("config.toml"))?;
+    if !live_text.trim().is_empty()
+        && let Ok(live_doc) = parse_toml_document(&live_text)
+    {
+        if let Some(live_desktop) = live_doc.get("desktop").cloned() {
+            if !live_desktop.is_none() {
+                merge_toml_item(&mut target_doc["desktop"], &live_desktop);
+            }
         }
-    }
-    for key in ["sandbox_mode", "approval_policy", "sandbox_workspace_write"] {
-        if let Some(live_value) = live_doc.get(key).cloned() {
-            merge_toml_item(&mut target_doc[key], &live_value);
+        for key in ["sandbox_mode", "approval_policy", "sandbox_workspace_write"] {
+            if let Some(live_value) = live_doc.get(key).cloned() {
+                merge_toml_item(&mut target_doc[key], &live_value);
+            }
         }
     }
     let context_usage_configured = target_doc

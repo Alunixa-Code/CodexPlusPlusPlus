@@ -159,3 +159,10 @@
 - 上游最终 Rust 格式提交因移植过程中已执行相同格式化而成为空补丁，已正常跳过；实际格式变化已包含在功能提交中。
 - 已确认新仓库 `Alunixa-Code/CodexPlusPlusPlus` 为公开 fork，默认分支为 `main`，当前账号拥有管理员权限且 Discussions 已启用。
 - 已将本次正式发布版本提升为 `1.2.53`，并开始迁移 Cargo 元数据、应用内项目链接、问题反馈、自动更新 API、README、贡献指南和 Discussions 到新仓库。
+- 已完成新仓库迁移并增加更新源回归测试；Rust workspace、前端 package、package-lock 和 Tauri 配置版本均为 `1.2.53`，活动代码和文档入口中不再引用旧仓库。
+- 全量验证第一轮发现上游音频测试辅助服务器没有传入现有 WebSocket 关闭通道，已为两处测试服务器补充独立 broadcast receiver。
+- 已移除上游 UI 对 VLM 的 Chat Completions 限制，使图片处理选择与后端一致地覆盖 Responses、Chat Completions、Completions、Anthropic 和 Gemini，并补齐本次新增 VLM 英文词条。
+- `i18n-verify` 复查后，本次新增 VLM 词条已无缺失；当前仅剩仓库既有的完整配置导入导出、文件选择器和分页词条差异。
+- 全量 Rust 测试第一轮通过绝大多数测试，仅发现启动时重复应用同一自定义模型供应商仍会创建备份。
+- 已定位幂等性问题：桌面安全设置保留函数在首次缺少 `config.toml` 时没有写入默认上下文用量开关，第二次才写入并被误判为变化。
+- 已将目标配置规范化与默认值补齐调整为首次和后续写入一致，旧配置存在时才额外合并白名单安全状态；原失败用例已定向通过。
