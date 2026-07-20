@@ -174,3 +174,13 @@
 - 已尝试 GitHub CLI OAuth 权限刷新，但授权等待超时并已清理残留进程；SSH 也没有可用 GitHub 公钥。
 - 已将完整已验证代码推送到同一 fork 网络的 `Alunixa/CodexPPP:codex/v1.2.53` 临时分支，作为远端安全副本。
 - 创建跨 fork PR 时同样被 Token 权限范围拒绝；继续覆盖新 fork、触发 Actions 和发布 Release 需要为新仓库授予 Contents 与 Workflows 写权限，或由用户明确授权使用已登录浏览器完成 GitHub OAuth。
+- 用户请求：将仓库的中英文 README、当前更新地址、下载地址和现有软件内全部项目入口统一迁移到 `Alunixa-Code/CodexPlusPlusPlus`，完成后推送代码并使用 GitHub Actions 构建。
+- 已读取本文件并检查工作树、远端、Actions 工作流与全仓 GitHub 地址；活动代码中的项目主页、问题反馈、更新 API、Releases 页面和 Discussions 已指向新仓库，旧地址命中只剩历史记录、上游来源和独立脚本市场。
+- 已创建迁移审计前检查点提交 `3c6d83e`。
+- 已将中英文 README 下载链接改为新仓库的 `/releases/latest`，并显式补充新项目主页与 Issues 地址。
+- 已将软件更新面板的 Releases 跳转改为新仓库最新版本页，并把更新源测试改为精确 URL 断言。
+- 已扩展 `tools/check-local-branding.mjs`，对 README、Cargo 元数据、更新器、管理器、注入页面、贡献指南和 Issue Template 的新仓库地址执行 CI 回归校验，并拒绝活动入口重新出现旧仓库地址。
+- 迁移地址保护脚本通过；更新器定向 12 项测试、Rust 格式检查和差异检查通过，活动入口中的旧仓库地址为零命中。
+- 前端 TypeScript 检查、12 项 Node 测试和 Vite 生产构建通过；Vite 仅保留既有的单 chunk 大于 500 KB 提醒。
+- 首次完整 Rust workspace 测试因本地已清理前端 `dist`，在 Tauri `generate_context!` 阶段提示 `frontendDist` 不存在；按 GitHub Actions 的真实顺序先构建前端后重跑，完整 workspace 全部零失败。
+- 已安全删除本次生成的 `apps/codex-plus-manager/dist`，并确认 `1420` 端口没有预览服务。

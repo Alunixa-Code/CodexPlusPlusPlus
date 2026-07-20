@@ -28,6 +28,62 @@ const expectedReadmeImages = [
   "assets/images/sponsor-alipay.jpg",
   "assets/images/sponsor-wechat.jpg",
 ];
+const expectedRepositoryMarkers = new Map([
+  [
+    "Cargo.toml",
+    ['repository = "https://github.com/Alunixa-Code/CodexPlusPlusPlus"'],
+  ],
+  [
+    "README.md",
+    [
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest",
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues",
+    ],
+  ],
+  [
+    "README_EN.md",
+    [
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest",
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues",
+    ],
+  ],
+  [
+    "CONTRIBUTING.md",
+    ["https://github.com/Alunixa-Code/CodexPlusPlusPlus.git"],
+  ],
+  [
+    "crates/codex-plus-core/src/update.rs",
+    [
+      '"Alunixa-Code/CodexPlusPlusPlus"',
+      "https://api.github.com/repos/Alunixa-Code/CodexPlusPlusPlus/releases/latest",
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest",
+    ],
+  ],
+  [
+    "apps/codex-plus-manager/src/App.tsx",
+    [
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus",
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues",
+    ],
+  ],
+  [
+    "assets/inject/renderer-inject.js",
+    [
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus",
+      "https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues",
+    ],
+  ],
+  [
+    ".github/ISSUE_TEMPLATE/config.yml",
+    ["https://github.com/Alunixa-Code/CodexPlusPlusPlus/discussions"],
+  ],
+]);
+const staleRepositoryMarkers = [
+  "https://github.com/ygzzfyh123/CodexPPP",
+  "https://api.github.com/repos/ygzzfyh123/CodexPPP",
+  "https://github.com/ygzzfyh123/CodexPlusPlus",
+  "https://api.github.com/repos/ygzzfyh123/CodexPlusPlus",
+];
 
 const failures = [];
 for (const readme of readmes) {
@@ -40,6 +96,20 @@ for (const readme of readmes) {
   for (const image of expectedReadmeImages) {
     if (!text.includes(image)) {
       failures.push(`${readme} does not reference owner donation image: ${image}`);
+    }
+  }
+}
+
+for (const [file, expectedMarkers] of expectedRepositoryMarkers) {
+  const text = readFileSync(resolve(root, file), "utf8");
+  for (const marker of expectedMarkers) {
+    if (!text.includes(marker)) {
+      failures.push(`${file} does not reference migrated repository marker: ${marker}`);
+    }
+  }
+  for (const marker of staleRepositoryMarkers) {
+    if (text.includes(marker)) {
+      failures.push(`${file} still references stale repository marker: ${marker}`);
     }
   }
 }
@@ -59,4 +129,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("Local README and donation branding guard passed.");
+console.log("Local README, repository link, and donation branding guard passed.");

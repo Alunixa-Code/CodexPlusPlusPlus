@@ -9,8 +9,14 @@ use serde_json::json;
 #[test]
 fn default_update_source_targets_migrated_repository() {
     assert_eq!(DEFAULT_REPOSITORY, "Alunixa-Code/CodexPlusPlusPlus");
-    assert!(DEFAULT_LATEST_RELEASE_API_URL.contains(DEFAULT_REPOSITORY));
-    assert!(DEFAULT_RELEASES_PAGE_URL.contains(DEFAULT_REPOSITORY));
+    assert_eq!(
+        DEFAULT_LATEST_RELEASE_API_URL,
+        "https://api.github.com/repos/Alunixa-Code/CodexPlusPlusPlus/releases/latest"
+    );
+    assert_eq!(
+        DEFAULT_RELEASES_PAGE_URL,
+        "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest"
+    );
 }
 
 #[test]

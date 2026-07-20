@@ -7,7 +7,7 @@ pub const DEFAULT_REPOSITORY: &str = "Alunixa-Code/CodexPlusPlusPlus";
 pub const DEFAULT_LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Alunixa-Code/CodexPlusPlusPlus/releases/latest";
 pub const DEFAULT_RELEASES_PAGE_URL: &str =
-    "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases";
+    "https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest";
 pub const MAX_RELEASE_SUMMARY_CHARS: usize = 1200;
 pub const MAX_RELEASE_SUMMARY_LINES: usize = 12;
 

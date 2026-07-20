@@ -23,11 +23,13 @@ Codex++ 是面向 OpenAI Codex / ChatGPT 桌面应用的外部启动器与管理
 
 ## 快速使用
 
-从 [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases) 下载最新版安装包：
+从 [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest) 下载最新版安装包：
 
 - Windows：`CodexPlusPlus-*-windows-x64-setup.exe`
 - macOS Intel：`CodexPlusPlus-*-macos-x64.dmg`
 - macOS Apple Silicon：`CodexPlusPlus-*-macos-arm64.dmg`
+
+项目主页：[Alunixa-Code/CodexPlusPlusPlus](https://github.com/Alunixa-Code/CodexPlusPlusPlus)；问题反馈：[GitHub Issues](https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues)。
 
 安装后会有两个入口：
 

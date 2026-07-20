@@ -20,11 +20,13 @@ Codex++ is an external launcher and manager for the OpenAI Codex / ChatGPT deskt
 
 ## Quick Start
 
-Download the latest installer from [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases):
+Download the latest installer from [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest):
 
 - Windows: `CodexPlusPlus-*-windows-x64-setup.exe`
 - macOS Intel: `CodexPlusPlus-*-macos-x64.dmg`
 - macOS Apple Silicon: `CodexPlusPlus-*-macos-arm64.dmg`
+
+Project home: [Alunixa-Code/CodexPlusPlusPlus](https://github.com/Alunixa-Code/CodexPlusPlusPlus). Report issues through [GitHub Issues](https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues).
 
 After installation, two entry points are available:
 
