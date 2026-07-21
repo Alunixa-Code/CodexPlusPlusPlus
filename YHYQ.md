@@ -220,3 +220,6 @@
 - 定向验证通过：模型名变体元数据测试、原生描述符 Node 合约测试、GPT-5.6 Ultra 真实请求转换测试、DeepSeek/OpenRouter 最高档兼容测试、JavaScript 语法检查和 Rust 格式检查。
 - 已核对作者历史修正后的 GitHub Actions：`v1.2.53` Release 重建成功；主分支 Windows 任务因 `bridge_backend_status_does_not_spam_diagnostic_log` 在并行测试中要求临时日志文件绝对不存在而失败，macOS x64/arm64 均成功。
 - 已修复该 CI 竞态测试：连续请求三次 `/backend/status`，只拒绝日志中出现对应的 `bridge.request` 记录，允许其他并行测试合法写入同一临时日志，继续约束状态轮询不得刷诊断日志。
+- `bridge_routes` 25 项并行测试已全部通过，Rust 格式和差异检查通过；测试稳定性修复已提交为 `9ebb5cc`。
+- 本次正式发布版本确定为 `v1.2.54`，版本将统一写入 Rust workspace、Cargo.lock、前端 package、package-lock 和 Tauri 配置。
+- `1.2.54` 更新日志将明确记录 GPT-5.6 Max/Ultra 原生 Effort 控件、模型名兼容匹配、Ultra 请求透传、DeepSeek/OpenRouter 最高档映射和 Windows CI 竞态修复。

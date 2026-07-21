@@ -1,5 +1,14 @@
 # 更新日志
 
+## 1.2.54 - 2026-07-21
+
+- 为支持的 GPT-5.6 模型补全 Codex 原生 Effort 档位：Sol 与 Terra 现在显示 Light、Medium、High、Extra High、Max 和 Ultra，Luna 按模型元数据显示到 Max。
+- 继续使用 Codex 原生 Effort 滑块、选项和切换动效，不注入重复控件；修复元数据未命中时界面只能到 Extra High 的问题。
+- 增强模型名识别，支持供应商路径前缀、大小写差异、上下文窗口后缀以及日期/版本后缀，同时避免相似模型名误匹配。
+- OpenAI 兼容 Responses 请求会原样保留 `reasoning.effort = "ultra"`，转换到 Chat Completions 时发送 `reasoning_effort = "ultra"`。
+- 对最高档命名不同的协议增加明确兼容：DeepSeek Ultra 映射到 `max`，OpenRouter Ultra 映射到 `xhigh`，避免请求静默丢失推理档位。
+- 修复 Windows GitHub Actions 中诊断日志测试的并行竞态，继续保证 `/backend/status` 轮询不会产生 `bridge.request` 日志。
+
 ## 1.2.53 - 2026-07-20
 
 - “添加供应商（可自定义）”新增供应商级 Codex 目标开关，与普通供应商一致地维护 `[features] goals = true`。
