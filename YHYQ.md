@@ -227,3 +227,9 @@
 - 按 Windows GitHub Actions 相同方式执行 `cargo test --workspace`，完整覆盖核心、协议代理、模型目录、CDP 注入、供应商切换、管理器、启动器、数据层和文档测试，全部零失败。
 - 修复后的 `bridge_backend_status_does_not_spam_diagnostic_log` 已在完整并行 workspace 测试中通过，旧主分支 Actions 的 Windows 竞态未复现。
 - `npm ci` 按锁文件安装成功；npm audit 报告现有依赖树含 1 个低危和 1 个高危项，本次未扩大范围升级依赖。
+- 已将发布提交 `08b7d35` 快进推送到 `Alunixa-Code/CodexPlusPlusPlus:main`，并创建、推送注释标签 `v1.2.54`；提交作者、提交者和标签 tagger 均为 `Alunixa Bot`。
+- 主分支 GitHub Actions 运行 `29792244351` 已成功完成 Windows artifacts、macOS DMG x64 和 macOS DMG arm64 三项任务；Windows 完整 Rust 测试已通过此前失败的并行日志用例。
+- 发布工作流运行 `29792252759` 已成功完成版本与新仓库地址校验、Windows x64、macOS x64、macOS arm64 构建、macOS 包结构校验、六项资产校验和 GitHub Release 发布。
+- `v1.2.54` 正式 Release 已核验包含六项 uploaded 资产并带 SHA-256 摘要：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
+- 已将自动生成的 Release 正文替换为完整中文说明，明确记录 GPT-5.6 Max/Ultra 原生 Effort 控件、模型名兼容、Ultra 请求透传、DeepSeek/OpenRouter 最高档映射、CI 稳定性修复和完整验证结果。
+- 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.54`。
