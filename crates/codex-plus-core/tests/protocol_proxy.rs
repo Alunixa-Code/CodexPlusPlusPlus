@@ -246,6 +246,14 @@ fn responses_request_matches_ccs_reasoning_and_tool_choice_edges() {
     }))
     .unwrap();
     assert_eq!(minimal["reasoning_effort"], "minimal");
+
+    let ultra = responses_to_chat_completions(json!({
+        "model": "gpt-5.6-sol",
+        "reasoning": { "effort": "ultra" },
+        "input": "hi"
+    }))
+    .unwrap();
+    assert_eq!(ultra["reasoning_effort"], "ultra");
 }
 
 #[test]
@@ -296,6 +304,14 @@ fn responses_request_applies_ccswitch_reasoning_dialects() {
     .unwrap();
     assert_eq!(deepseek["reasoning_effort"], "max");
 
+    let deepseek_ultra = responses_to_chat_completions(json!({
+        "model": "deepseek-reasoner",
+        "reasoning": { "effort": "ultra" },
+        "input": "hi"
+    }))
+    .unwrap();
+    assert_eq!(deepseek_ultra["reasoning_effort"], "max");
+
     let openrouter = responses_to_chat_completions(json!({
         "model": "openrouter/deepseek/deepseek-r1",
         "reasoning": { "effort": "max" },
@@ -304,6 +320,14 @@ fn responses_request_applies_ccswitch_reasoning_dialects() {
     .unwrap();
     assert_eq!(openrouter["reasoning"]["effort"], "xhigh");
     assert!(openrouter.get("reasoning_effort").is_none());
+
+    let openrouter_ultra = responses_to_chat_completions(json!({
+        "model": "openrouter/openai/gpt-5.6-sol",
+        "reasoning": { "effort": "ultra" },
+        "input": "hi"
+    }))
+    .unwrap();
+    assert_eq!(openrouter_ultra["reasoning"]["effort"], "xhigh");
 
     let openrouter_off = responses_to_chat_completions(json!({
         "model": "openrouter/deepseek/deepseek-r1",

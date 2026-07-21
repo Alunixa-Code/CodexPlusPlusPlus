@@ -837,6 +837,14 @@ fn injection_script_applies_fast_service_tier_contract() {
         cases["solDescriptor"]["supportedReasoningEfforts"][5]["reasoningEffort"],
         "ultra"
     );
+    assert_eq!(
+        cases["prefixedSolDescriptor"]["supportedReasoningEfforts"][5]["reasoningEffort"],
+        "ultra"
+    );
+    assert_eq!(
+        cases["versionedTerraDescriptor"]["supportedReasoningEfforts"][5]["reasoningEffort"],
+        "ultra"
+    );
     assert_eq!(cases["dispatcherFromSingleton"], true);
     assert_eq!(cases["dispatcherFromClass"], true);
 }
@@ -968,6 +976,21 @@ api.setModelCatalog({{
   }},
 }});
 const solDescriptor = api.modelDescriptor("gpt-5.6-sol");
+const prefixedSolDescriptor = api.modelDescriptor("openai/gpt-5.6-sol");
+api.setModelCatalog({{
+  status: "ok",
+  model: "vendor/GPT-5.6-Terra-2026-07-21",
+  default_model: "vendor/GPT-5.6-Terra-2026-07-21",
+  models: ["vendor/GPT-5.6-Terra-2026-07-21"],
+  modelMetadata: {{
+    "gpt-5.6-terra": {{
+      displayName: "GPT-5.6-Terra",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({{ reasoningEffort }})),
+    }},
+  }},
+}});
+const versionedTerraDescriptor = api.modelDescriptor("vendor/GPT-5.6-Terra-2026-07-21");
 const singletonDispatcher = {{ dispatchMessage() {{}}, subscribe() {{}} }};
 const dispatcherFromSingleton = api.dispatcherFromModule({{ current: singletonDispatcher }}) === singletonDispatcher;
 class DispatcherClass {{
@@ -986,6 +1009,8 @@ process.stdout.write(JSON.stringify({{
   startConversation,
   solFastAvailability,
   solDescriptor,
+  prefixedSolDescriptor,
+  versionedTerraDescriptor,
   dispatcherFromSingleton,
   dispatcherFromClass,
 }}));

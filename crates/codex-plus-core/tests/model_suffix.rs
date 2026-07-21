@@ -145,6 +145,36 @@ fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
 }
 
 #[test]
+fn gpt56_metadata_matches_provider_prefixes_and_version_suffixes() {
+    let prefixed = model_ui_metadata("openai/gpt-5.6-sol")
+        .expect("provider-prefixed Sol metadata should resolve");
+    assert_eq!(
+        prefixed["supportedReasoningEfforts"][5]["reasoningEffort"],
+        "ultra"
+    );
+
+    let versioned = model_ui_metadata("vendor:GPT-5.6-Terra-2026-07-21")
+        .expect("versioned Terra metadata should resolve");
+    assert_eq!(
+        versioned["supportedReasoningEfforts"][5]["reasoningEffort"],
+        "ultra"
+    );
+
+    let luna = model_ui_metadata("gateway/gpt-5.6-luna@latest")
+        .expect("provider-prefixed Luna metadata should resolve");
+    assert_eq!(
+        luna["supportedReasoningEfforts"][4]["reasoningEffort"],
+        "max"
+    );
+    assert_eq!(
+        luna["supportedReasoningEfforts"].as_array().unwrap().len(),
+        5
+    );
+
+    assert!(model_ui_metadata("gpt-5.6-solar").is_none());
+}
+
+#[test]
 fn model_ui_metadata_exposes_fast_service_tier_capability() {
     let metadata = model_ui_metadata("gpt-5.6-sol").expect("Sol metadata should exist");
 

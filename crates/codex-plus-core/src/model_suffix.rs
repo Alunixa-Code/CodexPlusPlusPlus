@@ -290,10 +290,45 @@ fn first_bundled_template_entry() -> Option<Value> {
 
 fn gpt56_metadata_entry(slug: &str) -> Option<Value> {
     let catalog: Value = serde_json::from_str(GPT56_METADATA_JSON).ok()?;
+    let normalized_slug = normalized_gpt56_model_slug(slug);
     catalog
         .get("models")?
         .as_array()?
         .iter()
-        .find(|entry| entry.get("slug").and_then(Value::as_str) == Some(slug))
+        .find(|entry| {
+            entry
+                .get("slug")
+                .and_then(Value::as_str)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(&normalized_slug))
+        })
         .cloned()
+}
+
+fn normalized_gpt56_model_slug(slug: &str) -> String {
+    let (slug, _) = parse_model_suffix(slug);
+    let normalized = slug.trim().to_ascii_lowercase();
+    for candidate in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        let Some(start) = normalized.rfind(candidate) else {
+            continue;
+        };
+        let end = start + candidate.len();
+        let prefix_ok = start == 0
+            || normalized[..start]
+                .chars()
+                .next_back()
+                .is_some_and(is_model_slug_separator);
+        let suffix_ok = end == normalized.len()
+            || normalized[end..]
+                .chars()
+                .next()
+                .is_some_and(is_model_slug_separator);
+        if prefix_ok && suffix_ok {
+            return candidate.to_string();
+        }
+    }
+    normalized
+}
+
+fn is_model_slug_separator(ch: char) -> bool {
+    matches!(ch, '/' | '\\' | ':' | '@' | '-' | '_' | '.')
 }

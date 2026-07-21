@@ -5660,7 +5660,7 @@ fn map_chat_reasoning_effort(effort: &str, style: ChatReasoningStyle) -> Option<
 
     match style {
         ChatReasoningStyle::DeepSeek => match effort.as_str() {
-            "max" | "xhigh" => Some("max"),
+            "ultra" | "max" | "xhigh" => Some("max"),
             _ => Some("high"),
         },
         ChatReasoningStyle::LowHigh => match effort.as_str() {
@@ -5668,7 +5668,7 @@ fn map_chat_reasoning_effort(effort: &str, style: ChatReasoningStyle) -> Option<
             _ => Some("high"),
         },
         ChatReasoningStyle::OpenRouter => match effort.as_str() {
-            "max" | "xhigh" => Some("xhigh"),
+            "ultra" | "max" | "xhigh" => Some("xhigh"),
             "high" => Some("high"),
             "medium" => Some("medium"),
             "low" => Some("low"),
@@ -5682,6 +5682,7 @@ fn map_chat_reasoning_effort(effort: &str, style: ChatReasoningStyle) -> Option<
             "high" => Some("high"),
             "xhigh" => Some("xhigh"),
             "max" => Some("max"),
+            "ultra" => Some("ultra"),
             _ => None,
         },
     }

@@ -5643,10 +5643,25 @@
 
   function codexPlusModelMetadata(modelName) {
     const metadata = codexModelCatalog.modelMetadata || codexModelCatalog.model_metadata;
-    const normalizedName = codexServiceTierModelFromValue(modelName);
-    const exact = metadata && typeof metadata === "object" ? metadata[normalizedName] : null;
-    const matchedKey = !exact && metadata && typeof metadata === "object"
-      ? Object.keys(metadata).find((key) => key.toLowerCase() === normalizedName.toLowerCase())
+    const normalizedName = codexServiceTierModelFromValue(modelName).trim();
+    if (!metadata || typeof metadata !== "object" || !normalizedName) return null;
+    const exact = metadata[normalizedName];
+    const normalizedLower = normalizedName.toLowerCase();
+    const modelIdentity = (value) => {
+      const normalized = String(value || "").trim().toLowerCase().replace(/\[[^\]]+\]$/, "");
+      for (const candidate of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+        const index = normalized.lastIndexOf(candidate);
+        if (index < 0) continue;
+        const before = index > 0 ? normalized[index - 1] : "";
+        const after = normalized[index + candidate.length] || "";
+        const separator = (character) => !character || "/:@-_.\\".includes(character);
+        if (separator(before) && separator(after)) return candidate;
+      }
+      return normalized;
+    };
+    const normalizedIdentity = modelIdentity(normalizedName);
+    const matchedKey = !exact
+      ? Object.keys(metadata).find((key) => key.toLowerCase() === normalizedLower || modelIdentity(key) === normalizedIdentity)
       : null;
     const value = exact || (matchedKey ? metadata[matchedKey] : null);
     return value && typeof value === "object" ? value : null;

@@ -211,3 +211,10 @@
 - 已重建 `v1.2.53` 注释标签，tagger 由旧 Bot 改为 `Alunixa Bot <117560826+Alunixa@users.noreply.github.com>`。
 - 已将全局和仓库级 Git author 配置均改为 `Alunixa Bot`，避免后续仓库再次生成 `AlgerMusic Build Bot` 提交。
 - 重写后验证通过：`codex-plus-core` 全套测试全部零失败，前端 12 项测试、TypeScript 检查、新仓库地址与本地品牌保护、差异检查全部通过。
+- 用户请求：修复 Codex 原生 Effort 控件只显示 Light 到 Extra High 的问题，为支持的模型补充 Max 和 Ultra，保留原生滑块、选项与动效，并确保选择 Ultra 后真实请求不会被丢弃或错误降级。
+- 已创建修改前检查点提交 `19f320e`。
+- 初步定位到两个缺口：GPT-5.6 UI 元数据只做完整模型名精确匹配，带供应商前缀或版本后缀时会回退到 `low/medium/high/xhigh`；Chat Completions 协议转换未接受 `ultra`。
+- 已增强 GPT-5.6 模型身份匹配，支持大小写差异、供应商路径前缀、上下文窗口后缀和日期/版本后缀，同时使用边界校验避免把 `gpt-5.6-solar` 等相似名称误识别为 Sol。
+- 原生模型描述符现在可为 Sol/Terra 提供 `low/medium/high/xhigh/max/ultra`，Luna 保持其元数据声明的最高 `max`；继续复用 Codex 原生 Effort 滑块、选项和动效，没有注入重复控件。
+- Chat Completions 转换已支持默认 OpenAI 兼容协议原样发送 `reasoning_effort = "ultra"`；DeepSeek 的 Ultra 映射到其最高 `max`，OpenRouter 的 Ultra 映射到其最高 `xhigh`。
+- 定向验证通过：模型名变体元数据测试、原生描述符 Node 合约测试、GPT-5.6 Ultra 真实请求转换测试、DeepSeek/OpenRouter 最高档兼容测试、JavaScript 语法检查和 Rust 格式检查。
