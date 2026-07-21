@@ -771,11 +771,19 @@ async fn bridge_backend_status_does_not_spam_diagnostic_log() {
         StatusStore::default(),
     )));
 
-    let result = handle_bridge_request(ctx, "/backend/status", json!({})).await;
+    for _ in 0..3 {
+        let result = handle_bridge_request(ctx.clone(), "/backend/status", json!({})).await;
+        assert_eq!(result["status"], "ok");
+    }
 
-    assert_eq!(result["status"], "ok");
-    assert!(!log_path.exists());
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
     codex_plus_core::diagnostic_log::set_diagnostic_log_path_for_tests(None);
+    let logged_backend_status = log.lines().any(|line| {
+        serde_json::from_str::<Value>(line).is_ok_and(|record| {
+            record["event"] == "bridge.request" && record["detail"]["path"] == "/backend/status"
+        })
+    });
+    assert!(!logged_backend_status);
 }
 
 #[test]

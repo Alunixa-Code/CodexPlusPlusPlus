@@ -218,3 +218,5 @@
 - 原生模型描述符现在可为 Sol/Terra 提供 `low/medium/high/xhigh/max/ultra`，Luna 保持其元数据声明的最高 `max`；继续复用 Codex 原生 Effort 滑块、选项和动效，没有注入重复控件。
 - Chat Completions 转换已支持默认 OpenAI 兼容协议原样发送 `reasoning_effort = "ultra"`；DeepSeek 的 Ultra 映射到其最高 `max`，OpenRouter 的 Ultra 映射到其最高 `xhigh`。
 - 定向验证通过：模型名变体元数据测试、原生描述符 Node 合约测试、GPT-5.6 Ultra 真实请求转换测试、DeepSeek/OpenRouter 最高档兼容测试、JavaScript 语法检查和 Rust 格式检查。
+- 已核对作者历史修正后的 GitHub Actions：`v1.2.53` Release 重建成功；主分支 Windows 任务因 `bridge_backend_status_does_not_spam_diagnostic_log` 在并行测试中要求临时日志文件绝对不存在而失败，macOS x64/arm64 均成功。
+- 已修复该 CI 竞态测试：连续请求三次 `/backend/status`，只拒绝日志中出现对应的 `bridge.request` 记录，允许其他并行测试合法写入同一临时日志，继续约束状态轮询不得刷诊断日志。
