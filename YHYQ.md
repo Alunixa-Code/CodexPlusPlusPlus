@@ -199,3 +199,10 @@
 - `v1.2.53` Release 已核验包含六项 uploaded 资产并带 SHA-256 摘要：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
 - 已将自动生成的简略正文替换为完整中文发布说明，明确记录自定义供应商目标、AI 终端、BM25/嵌入记忆检索、三态图片处理、GPT-5.6/Fast、音频转写代理、路径识别、安全状态、无项目兜底、仓库迁移和完整验证结果。
 - 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.53`。
+- 用户复述并要求再次确认：只同步上游 `v1.2.38` 指定的三态图片处理、GPT-5.6/Fast、音频转写代理、安装路径识别、安全状态与无项目兜底、测试稳定性和 Rust 格式修复，同时完成新仓库全量覆盖、地址迁移、测试、Actions 构建和 Release。
+- 用户指出 GitHub 提交错误显示为 `AlgerMusic Build Bot`，要求解释令牌身份与提交身份的差异，并将提交作者改为 `Alunixa Bot`。
+- 已核验当前代码确实包含指定功能及对应测试：`vision.rs` 三态处理、GPT-5.6 模型目录、`/audio/transcriptions` 转发、Codex++ 安装目录拒绝、安全状态快照和 projectless 启动兜底均存在；对应选择性上游提交为 `2bb4b92`、`c888380`、`bdc9ef1`、`cbc38d0`、`d202f44` 和测试补丁 `42e0b12`。
+- 已定位作者错误来源：全局 Git 配置为 `AlgerMusic Build Bot <bot@algerkc.com>`；GitHub 令牌只决定推送权限，不会覆盖提交对象内的 author/committer 元数据。
+- 当前 `main` 共 654 个提交，其中 62 个 author 和 75 个 committer 使用旧 Bot 邮箱；修复将只替换该邮箱，保留 BigPizzaV3、Yuimi-chaya 等上游原作者。
+- 已创建本地回滚分支 `codex/backup-pre-alunixa-author-fix`，并在当前仓库设置 `Alunixa Bot <117560826+Alunixa@users.noreply.github.com>`，该 noreply 邮箱与 GitHub 账号 `Alunixa` 关联。
+- 已创建作者历史重写前检查点提交 `75d98fb`。
