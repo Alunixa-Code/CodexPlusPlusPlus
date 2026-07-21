@@ -223,3 +223,7 @@
 - `bridge_routes` 25 项并行测试已全部通过，Rust 格式和差异检查通过；测试稳定性修复已提交为 `9ebb5cc`。
 - 本次正式发布版本确定为 `v1.2.54`，版本将统一写入 Rust workspace、Cargo.lock、前端 package、package-lock 和 Tauri 配置。
 - `1.2.54` 更新日志将明确记录 GPT-5.6 Max/Ultra 原生 Effort 控件、模型名兼容匹配、Ultra 请求透传、DeepSeek/OpenRouter 最高档映射和 Windows CI 竞态修复。
+- `v1.2.54` 前端验证通过：12 项 Node 测试、TypeScript 检查、Vite 生产构建和新仓库品牌/更新地址保护全部成功；Vite 仅保留既有的单 chunk 超过 500 KB 提醒。
+- 按 Windows GitHub Actions 相同方式执行 `cargo test --workspace`，完整覆盖核心、协议代理、模型目录、CDP 注入、供应商切换、管理器、启动器、数据层和文档测试，全部零失败。
+- 修复后的 `bridge_backend_status_does_not_spam_diagnostic_log` 已在完整并行 workspace 测试中通过，旧主分支 Actions 的 Windows 竞态未复现。
+- `npm ci` 按锁文件安装成功；npm audit 报告现有依赖树含 1 个低危和 1 个高危项，本次未扩大范围升级依赖。
