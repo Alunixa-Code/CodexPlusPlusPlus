@@ -206,3 +206,8 @@
 - 当前 `main` 共 654 个提交，其中 62 个 author 和 75 个 committer 使用旧 Bot 邮箱；修复将只替换该邮箱，保留 BigPizzaV3、Yuimi-chaya 等上游原作者。
 - 已创建本地回滚分支 `codex/backup-pre-alunixa-author-fix`，并在当前仓库设置 `Alunixa Bot <117560826+Alunixa@users.noreply.github.com>`，该 noreply 邮箱与 GitHub 账号 `Alunixa` 关联。
 - 已创建作者历史重写前检查点提交 `75d98fb`。
+- 已使用 `git filter-repo` 只替换 `bot@algerkc.com` 对应的 author 与 committer，重写后的 `main` 中旧 Bot 作者和提交者计数均为零；上游提交继续保留原 author，仅提交者改为 `Alunixa Bot`。
+- 历史重写前后当前 `main` tree hash 均为 `1dae75c0c349a2d53165209f81f7a39888dc31c3`，`v1.2.53` tree hash 均为 `d4702327e5963190e5e3af29c7cdff590861fa1c`，确认源文件内容逐字节未变。
+- 已重建 `v1.2.53` 注释标签，tagger 由旧 Bot 改为 `Alunixa Bot <117560826+Alunixa@users.noreply.github.com>`。
+- 已将全局和仓库级 Git author 配置均改为 `Alunixa Bot`，避免后续仓库再次生成 `AlgerMusic Build Bot` 提交。
+- 重写后验证通过：`codex-plus-core` 全套测试全部零失败，前端 12 项测试、TypeScript 检查、新仓库地址与本地品牌保护、差异检查全部通过。
