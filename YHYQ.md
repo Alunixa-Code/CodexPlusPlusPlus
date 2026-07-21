@@ -187,3 +187,15 @@
 - 已提交迁移补丁 `0b4007a`；使用精确远端租约对新仓库 `main` 执行覆盖推送 dry-run 时，Windows Git 凭据、项目指令令牌和 GitHub CLI 当前令牌均返回 Contents 写入 403。
 - 已尝试启动 GitHub CLI OAuth 权限刷新；内置浏览器没有 GitHub 登录态，因此没有输入账号密码或继续授权，随后关闭授权页、停止等待进程并删除临时日志。
 - 继续推送需要为现有令牌授予新仓库 Contents 与 Workflows 写权限，或由用户明确授权使用已登录 Chrome 完成一次 GitHub OAuth。
+
+## 2026-07-21
+
+- 用户再次明确目标仓库为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus`，要求使用 `~/.codex/agents.md` 中已更新权限的令牌，以本地代码覆盖远端仓库并完成 GitHub Actions 构建。
+- 已读取更新后的本机授权配置，全程未在对话、代码、提交或日志中输出令牌内容。
+- 使用精确租约将新仓库 `main` 从初始 fork 提交 `1e1e191` 覆盖为本地完整代码提交 `712c3fa`，并确认远端 `main` 指向相同提交。
+- 已创建并推送正式标签 `v1.2.53`，标签指向已完成迁移与验证的提交 `712c3fa`。
+- 主分支工作流 `29789220094` 已成功完成 Windows artifacts、macOS DMG x64 和 macOS DMG arm64 三项任务；前端测试、TypeScript、生产构建、Rust 测试、release 二进制、NSIS 与 DMG 打包均通过。
+- 发布工作流 `29789250373` 已成功完成版本与新仓库地址校验、Windows x64、macOS x64、macOS arm64 构建、macOS 包结构校验、六项资产校验和 GitHub Release 发布。
+- `v1.2.53` Release 已核验包含六项 uploaded 资产并带 SHA-256 摘要：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
+- 已将自动生成的简略正文替换为完整中文发布说明，明确记录自定义供应商目标、AI 终端、BM25/嵌入记忆检索、三态图片处理、GPT-5.6/Fast、音频转写代理、路径识别、安全状态、无项目兜底、仓库迁移和完整验证结果。
+- 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.53`。
